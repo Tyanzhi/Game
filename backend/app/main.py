@@ -11,10 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .autonomous_cycle import run_cycle
 from .db import get_db
 from .init_db import init_db
-from .models import ActorModel, EventModel, RelationshipModel
+from .models import ActorModel, CountryModel, EventModel, RelationshipModel
 from .schemas import Actor, EventCreate, WorldStateResponse
 
-app = FastAPI(title="WORLD ENGINE API", version="0.6.0")
+app = FastAPI(title="WORLD ENGINE API", version="0.6.1")
 
 
 class Country(BaseModel):
@@ -73,7 +73,7 @@ async def get_actor(actor_id: str, session: AsyncSession = Depends(get_db)) -> A
 
 @app.get("/api/countries", response_model=List[Country])
 async def list_countries(session: AsyncSession = Depends(get_db)) -> List[Country]:
-    rows = (await session.execute(select(__import__('app.models', fromlist=['CountryModel']).CountryModel).order_by(__import__('app.models', fromlist=['CountryModel']).CountryModel.id))).scalars().all()
+    rows = (await session.execute(select(CountryModel).order_by(CountryModel.id))).scalars().all()
     return [Country.model_validate(row, from_attributes=True) for row in rows]
 
 
@@ -107,5 +107,4 @@ async def ingest_event(event: EventCreate, session: AsyncSession = Depends(get_d
 
 @app.post("/api/engine/cycle")
 async def autonomous_cycle(query: str = "geopolitics", max_records: int = 25) -> dict:
-    """One cycle: real source -> normalization -> deduplication -> persistent world state."""
     return await run_cycle(query=query, max_records=max_records)
