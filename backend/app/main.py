@@ -8,13 +8,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .autonomous_cycle import run_cycle
 from .db import get_db
 from .init_db import init_db
 from .models import ActorModel
 from .schemas import Actor, EventCreate, WorldStateResponse
 from .world_models import CountryModel, RelationshipModel  # noqa: F401 - registers metadata
 
-app = FastAPI(title="WORLD ENGINE API", version="0.4.0")
+app = FastAPI(title="WORLD ENGINE API", version="0.5.0")
 
 
 class Country(BaseModel):
@@ -55,11 +56,7 @@ async def _actors(session: AsyncSession) -> List[Actor]:
 @app.get("/api/world/state", response_model=WorldStateResponse)
 async def get_world_state(session: AsyncSession = Depends(get_db)) -> WorldStateResponse:
     actors = await _actors(session)
-    return WorldStateResponse(
-        tick=0,
-        timestamp=datetime.now(timezone.utc),
-        actors={actor.id: actor for actor in actors},
-    )
+    return WorldStateResponse(tick=0, timestamp=datetime.now(timezone.utc), actors={actor.id: actor for actor in actors})
 
 
 @app.get("/api/actors", response_model=List[Actor])
@@ -95,12 +92,14 @@ async def ingest_event(event: EventCreate, session: AsyncSession = Depends(get_d
         if actor is None:
             raise HTTPException(status_code=400, detail=f"Unknown actor: {actor_id}")
         actor_rows.append(actor)
-
     for actor in actor_rows:
         actor.stability = max(0, min(1, actor.stability + event.impact.get("stability", 0)))
-        actor.domestic_pressure = max(
-            0, min(1, actor.domestic_pressure + event.impact.get("domestic_pressure", 0))
-        )
-
+        actor.domestic_pressure = max(0, min(1, actor.domestic_pressure + event.impact.get("domestic_pressure", 0)))
     await session.commit()
     return await get_world_state(session)
+
+
+@app.post("/api/engine/cycle")
+async def autonomous_cycle(query: str = "geopolitics", max_records: int = 25) -> dict:
+    """Run one real-data ingestion -> normalization -> deduplication cycle."""
+    return await run_cycle(query=query, max_records=max_records)
