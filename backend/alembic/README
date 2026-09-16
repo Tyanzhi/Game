@@ -1,0 +1,5 @@
+# Alembic migrations
+
+Run from `backend/`:
+
+`alembic upgrade head`
