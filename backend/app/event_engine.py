@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import hashlib
-import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import hashlib
+import re
 from difflib import SequenceMatcher
 from typing import Iterable
 
 STATUSES = {"FACT", "CLAIM", "HYPOTHESIS"}
-
 
 @dataclass(frozen=True)
 class RawEvent:
@@ -22,7 +21,6 @@ class RawEvent:
     confidence: float = 0.5
     raw: dict | None = None
 
-
 @dataclass(frozen=True)
 class NormalizedEvent:
     event_id: str
@@ -35,6 +33,7 @@ class NormalizedEvent:
     confidence: float
     status: str
     source_urls: tuple[str, ...] = ()
+    metadata: dict | None = None
 
 
 def _canonical(text: str) -> str:
@@ -71,33 +70,19 @@ def _same_story(a: RawEvent, b: RawEvent) -> bool:
 def normalize(events: Iterable[RawEvent]) -> list[NormalizedEvent]:
     groups: list[list[RawEvent]] = []
     for event in events:
-        placed = False
         for group in groups:
             if fingerprint(event) == fingerprint(group[0]) or _same_story(event, group[0]):
                 group.append(event)
-                placed = True
                 break
-        if not placed:
+        else:
             groups.append([event])
-
     result: list[NormalizedEvent] = []
     for group in groups:
         first = max(group, key=lambda item: item.timestamp)
-        ids = sorted({fingerprint(item) for item in group})
-        event_id = ids[0] if ids else fingerprint(first)
         source_ids = tuple(sorted({item.source_id for item in group}))
+        source_urls = tuple(sorted({item.source_url for item in group if item.source_url}))
         confidence = min(0.99, max(item.confidence for item in group) + 0.05 * max(0, len(source_ids) - 1))
         status = "FACT" if len(source_ids) >= 2 or confidence >= 0.75 else "CLAIM"
-        result.append(NormalizedEvent(
-            event_id=event_id,
-            timestamp=first.timestamp.astimezone(timezone.utc),
-            actors=tuple(sorted({a for item in group for a in item.actor_ids})),
-            event_type=first.event_type,
-            description=first.description or first.title,
-            source_ids=source_ids,
-            source_count=len(source_ids),
-            confidence=confidence,
-            status=status if status in STATUSES else "HYPOTHESIS",
-            source_urls=tuple(sorted({item.source_url for item in group if item.source_url})),
-        ))
+        metadata = {"raw_sources": [item.raw or {} for item in group], "dedup_group_size": len(group)}
+        result.append(NormalizedEvent(fingerprint(first), first.timestamp.astimezone(timezone.utc), tuple(sorted({a for item in group for a in item.actor_ids})), first.event_type, first.description or first.title, source_ids, len(source_ids), confidence, status if status in STATUSES else "HYPOTHESIS", source_urls, metadata))
     return sorted(result, key=lambda event: event.timestamp, reverse=True)
