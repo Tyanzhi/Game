@@ -1,22 +1,16 @@
 from __future__ import annotations
-
 from datetime import datetime, timezone
-
 from sqlalchemy import DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-
 
 class Base(DeclarativeBase):
     pass
 
-
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
-
 class ActorModel(Base):
     __tablename__ = "actors"
-
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     actor_type: Mapped[str] = mapped_column(String(32), default="state", nullable=False)
@@ -25,23 +19,23 @@ class ActorModel(Base):
     diplomatic_capacity: Mapped[float] = mapped_column(Float, default=0.7, nullable=False)
     security_capacity: Mapped[float] = mapped_column(Float, default=0.7, nullable=False)
     domestic_pressure: Mapped[float] = mapped_column(Float, default=0.3, nullable=False)
+    risk_tolerance: Mapped[float] = mapped_column(Float, default=0.5, nullable=False)
+    strategic_patience: Mapped[float] = mapped_column(Float, default=0.5, nullable=False)
+    escalation_threshold: Mapped[float] = mapped_column(Float, default=0.6, nullable=False)
+    information_quality: Mapped[float] = mapped_column(Float, default=0.65, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
 
-
 class CountryModel(Base):
     __tablename__ = "countries"
-
     id: Mapped[str] = mapped_column(String(3), primary_key=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     actor_id: Mapped[str | None] = mapped_column(ForeignKey("actors.id"), unique=True)
     region: Mapped[str | None] = mapped_column(String(100))
 
-
 class RelationshipModel(Base):
     __tablename__ = "relationships"
     __table_args__ = (UniqueConstraint("source_actor_id", "target_actor_id", name="uq_relationship_pair"),)
-
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     source_actor_id: Mapped[str] = mapped_column(ForeignKey("actors.id"), nullable=False)
     target_actor_id: Mapped[str] = mapped_column(ForeignKey("actors.id"), nullable=False)
@@ -54,10 +48,8 @@ class RelationshipModel(Base):
     political: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     information: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
 
-
 class EventModel(Base):
     __tablename__ = "events"
-
     id: Mapped[str] = mapped_column(String(128), primary_key=True)
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
     title: Mapped[str] = mapped_column(String(500), default="", nullable=False)
@@ -69,11 +61,9 @@ class EventModel(Base):
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
-
 class EventSourceModel(Base):
     __tablename__ = "event_sources"
     __table_args__ = (UniqueConstraint("event_id", "source_id", name="uq_event_source"),)
-
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     event_id: Mapped[str] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
     source_id: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -82,10 +72,8 @@ class EventSourceModel(Base):
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     raw_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
 
-
 class SimulationRunModel(Base):
     __tablename__ = "simulation_runs"
-
     id: Mapped[str] = mapped_column(String(128), primary_key=True)
     mode: Mapped[str] = mapped_column(String(32), default="live", nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="running", nullable=False)
@@ -96,26 +84,45 @@ class SimulationRunModel(Base):
     events_new: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     events_deduplicated: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
-
 class SimulationTickModel(Base):
     __tablename__ = "simulation_ticks"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     simulation_id: Mapped[str] = mapped_column(ForeignKey("simulation_runs.id", ondelete="CASCADE"), nullable=False)
     tick: Mapped[int] = mapped_column(Integer, nullable=False)
     event_ids: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     state_changes: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
-
 class WorldSnapshotModel(Base):
     __tablename__ = "world_snapshots"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     tick: Mapped[int] = mapped_column(Integer, nullable=False)
     simulation_id: Mapped[str] = mapped_column(String(128), nullable=False)
     model_version: Mapped[str] = mapped_column(String(64), nullable=False)
     dataset_version: Mapped[str] = mapped_column(String(64), nullable=False)
     random_seed: Mapped[int] = mapped_column(Integer, nullable=False)
     state_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+class DecisionModel(Base):
+    __tablename__ = "decisions"
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    actor_id: Mapped[str] = mapped_column(ForeignKey("actors.id"), nullable=False)
+    simulation_id: Mapped[str | None] = mapped_column(ForeignKey("simulation_runs.id"))
+    situation: Mapped[str] = mapped_column(Text, nullable=False)
+    selected_action: Mapped[str] = mapped_column(String(64), nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    reasoning_factors: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    options: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    information_state: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+class ActionModel(Base):
+    __tablename__ = "actions"
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    decision_id: Mapped[str] = mapped_column(ForeignKey("decisions.id"), nullable=False)
+    actor_id: Mapped[str] = mapped_column(ForeignKey("actors.id"), nullable=False)
+    action_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="proposed", nullable=False)
+    effects: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
