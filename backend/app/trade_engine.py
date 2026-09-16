@@ -1,22 +1,22 @@
+"""Trade-network engine. Edges are value flows and resilience channels."""
 from __future__ import annotations
 from dataclasses import dataclass
 
-def clamp(v: float) -> float: return max(0.0, min(1.0, float(v)))
-
 @dataclass(frozen=True)
-class TradeLink:
+class TradeEdge:
     source: str
     target: str
-    volume: float
+    value: float
     dependency: float
     resilience: float
 
-def step(links: list[TradeLink], shocks: dict[tuple[str,str], float] | None = None) -> dict:
-    shocks = shocks or {}
-    out = []
-    for link in links:
-        shock = clamp(shocks.get((link.source, link.target), 0.0))
-        effective = link.volume * (1.0 - shock * (1.0 - link.resilience))
-        disruption = shock * link.dependency
-        out.append({"source": link.source, "target": link.target, "volume": effective, "disruption": disruption, "dependency": link.dependency})
-    return {"links": out, "total_volume": sum(x["volume"] for x in out), "systemic_disruption": sum(x["disruption"] for x in out)}
+def network(edges: list[dict]) -> dict:
+    normalized=[]
+    for e in edges:
+        value=max(0.0,float(e.get('value',0))); dep=max(0.0,min(1.0,float(e.get('dependency',0))))
+        normalized.append(TradeEdge(str(e.get('source','')),str(e.get('target','')),value,dep,max(0.0,min(1.0,1-dep))))
+    exposure={}
+    for e in normalized:
+        exposure[e.source]=exposure.get(e.source,0)+e.value*e.dependency
+        exposure[e.target]=exposure.get(e.target,0)+e.value*e.dependency
+    return {'edges':[e.__dict__ for e in normalized],'exposure':exposure,'total_value':sum(e.value for e in normalized)}

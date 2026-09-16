@@ -1,21 +1,19 @@
+"""Social-dynamics engine: pressure, unrest and cohesion."""
 from __future__ import annotations
 from dataclasses import dataclass
 
-def clamp(v: float, lo: float = 0.0, hi: float = 1.0) -> float: return max(lo, min(hi, float(v)))
-
+def clamp(v): return max(0.0,min(1.0,float(v)))
 @dataclass(frozen=True)
-class SocialState:
-    trust: float
-    polarization: float
-    protest_pressure: float
-    cohesion: float
-    migration_pressure: float
+class SocialResult:
+    actor_id:str
+    unrest:float
+    cohesion:float
+    changes:dict
 
-def step(state: SocialState, *, economic_stress: float = 0.0, shock: float = 0.0, institutional_response: float = 0.0) -> tuple[SocialState, dict]:
-    protest = clamp(state.protest_pressure + 0.16*economic_stress + 0.10*shock - 0.12*institutional_response)
-    polarization = clamp(state.polarization + 0.08*shock + 0.05*economic_stress - 0.04*institutional_response)
-    trust = clamp(state.trust - 0.08*economic_stress - 0.05*shock + 0.07*institutional_response)
-    cohesion = clamp(state.cohesion + 0.05*trust - 0.05*polarization - 0.03*protest)
-    migration = clamp(state.migration_pressure + 0.10*economic_stress + 0.08*shock - 0.03*trust)
-    new = SocialState(trust, polarization, protest, cohesion, migration)
-    return new, {"trust_change": trust-state.trust, "polarization_change": polarization-state.polarization, "protest_change": protest-state.protest_pressure, "cohesion_change": cohesion-state.cohesion, "migration_change": migration-state.migration_pressure}
+def run(states:dict[str,dict]) -> dict[str,SocialResult]:
+    out={}
+    for actor,s in states.items():
+        stability=clamp(s.get('stability',.5)); pressure=clamp(s.get('domestic_pressure',.3))
+        unrest=clamp(.70*pressure+.30*(1-stability)); cohesion=clamp(.65*stability+.20*(1-pressure))
+        out[actor]=SocialResult(actor,unrest,cohesion,{'stability':-unrest*.025,'domestic_pressure':unrest*.01})
+    return out

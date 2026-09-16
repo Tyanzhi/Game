@@ -1,20 +1,19 @@
+"""Energy-security engine with supply, demand and disruption effects."""
 from __future__ import annotations
 from dataclasses import dataclass
 
-def clamp(v: float, lo: float = 0.0, hi: float = 1.0) -> float: return max(lo, min(hi, float(v)))
-
+def clamp(v): return max(0.0,min(1.0,float(v)))
 @dataclass(frozen=True)
-class EnergyState:
-    supply: float
-    demand: float
-    storage: float
-    import_dependency: float
-    diversification: float
+class EnergyResult:
+    actor_id:str
+    security:float
+    disruption:float
+    changes:dict
 
-def step(state: EnergyState, *, supply_shock: float = 0.0, demand_shock: float = 0.0) -> tuple[EnergyState, dict]:
-    shock = clamp(supply_shock)
-    supply = clamp(state.supply - shock*(1.0-state.diversification) + 0.01*state.storage)
-    demand = clamp(state.demand + demand_shock)
-    storage = clamp(state.storage + 0.02*(supply-demand) - 0.02*shock)
-    security = clamp(supply/(0.1+demand))
-    return EnergyState(supply, demand, storage, state.import_dependency, state.diversification), {"energy_security": security, "supply_change": supply-state.supply, "storage_change": storage-state.storage}
+def run(states:dict[str,dict]) -> dict[str,EnergyResult]:
+    out={}
+    for actor,s in states.items():
+        capacity=clamp(s.get('economic_capacity',.5)); pressure=clamp(s.get('domestic_pressure',.3))
+        security=clamp(.65*capacity+.20*(1-pressure)); disruption=clamp(.35*pressure+.20*(1-capacity))
+        out[actor]=EnergyResult(actor,security,disruption,{'stability':(security-.5)*.02,'economic_capacity':-disruption*.01})
+    return out
