@@ -82,7 +82,12 @@ async def run_cycle(query: str = 'geopolitics', max_records: int = 25) -> dict:
                              'conflict_pressure': -conflict[a].escalation}, 5, 1)
                 for a, s in states.items()
             }
-            trade = trade_run([])
+            trade_edges = [
+                {'source': r.source_actor_id, 'target': r.target_actor_id,
+                 'value': max(0.0, r.trade), 'dependency': max(0.0, min(1.0, (1.0 - r.economic) / 2.0))}
+                for r in rel_rows if r.trade != 0
+            ]
+            trade = trade_run(trade_edges)
 
             # Apply only bounded, deterministic engine deltas; no engine receives raw text.
             engine_changes = {}
