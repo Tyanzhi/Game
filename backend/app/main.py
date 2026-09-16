@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import List
 
 from fastapi import Depends, FastAPI, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,8 +12,29 @@ from .db import get_db
 from .init_db import init_db
 from .models import ActorModel
 from .schemas import Actor, EventCreate, WorldStateResponse
+from .world_models import CountryModel, RelationshipModel  # noqa: F401 - registers metadata
 
-app = FastAPI(title="WORLD ENGINE API", version="0.3.0")
+app = FastAPI(title="WORLD ENGINE API", version="0.4.0")
+
+
+class Country(BaseModel):
+    id: str
+    name: str
+    actor_id: str | None = None
+    region: str | None = None
+
+
+class Relationship(BaseModel):
+    source_actor_id: str
+    target_actor_id: str
+    diplomatic: float = Field(0, ge=-1, le=1)
+    economic: float = Field(0, ge=-1, le=1)
+    military: float = Field(0, ge=-1, le=1)
+    trade: float = Field(0, ge=-1, le=1)
+    energy: float = Field(0, ge=-1, le=1)
+    technology: float = Field(0, ge=-1, le=1)
+    political: float = Field(0, ge=-1, le=1)
+    information: float = Field(0, ge=-1, le=1)
 
 
 @app.on_event("startup")
@@ -51,6 +73,18 @@ async def get_actor(actor_id: str, session: AsyncSession = Depends(get_db)) -> A
     if actor is None:
         raise HTTPException(status_code=404, detail="Actor not found")
     return Actor.model_validate(actor, from_attributes=True)
+
+
+@app.get("/api/countries", response_model=List[Country])
+async def list_countries(session: AsyncSession = Depends(get_db)) -> List[Country]:
+    rows = (await session.execute(select(CountryModel).order_by(CountryModel.id))).scalars().all()
+    return [Country.model_validate(row, from_attributes=True) for row in rows]
+
+
+@app.get("/api/relationships", response_model=List[Relationship])
+async def list_relationships(session: AsyncSession = Depends(get_db)) -> List[Relationship]:
+    rows = (await session.execute(select(RelationshipModel).order_by(RelationshipModel.id))).scalars().all()
+    return [Relationship.model_validate(row, from_attributes=True) for row in rows]
 
 
 @app.post("/api/events", response_model=WorldStateResponse)
