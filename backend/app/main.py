@@ -5,17 +5,16 @@ from typing import List
 
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .autonomous_cycle import run_cycle
 from .db import get_db
 from .init_db import init_db
-from .models import ActorModel
+from .models import ActorModel, EventModel, RelationshipModel
 from .schemas import Actor, EventCreate, WorldStateResponse
-from .world_models import CountryModel, RelationshipModel  # noqa: F401 - registers metadata
 
-app = FastAPI(title="WORLD ENGINE API", version="0.5.0")
+app = FastAPI(title="WORLD ENGINE API", version="0.6.0")
 
 
 class Country(BaseModel):
@@ -56,7 +55,7 @@ async def _actors(session: AsyncSession) -> List[Actor]:
 @app.get("/api/world/state", response_model=WorldStateResponse)
 async def get_world_state(session: AsyncSession = Depends(get_db)) -> WorldStateResponse:
     actors = await _actors(session)
-    return WorldStateResponse(tick=0, timestamp=datetime.now(timezone.utc), actors={actor.id: actor for actor in actors})
+    return WorldStateResponse(tick=0, timestamp=datetime.now(timezone.utc), actors={a.id: a for a in actors})
 
 
 @app.get("/api/actors", response_model=List[Actor])
@@ -74,7 +73,7 @@ async def get_actor(actor_id: str, session: AsyncSession = Depends(get_db)) -> A
 
 @app.get("/api/countries", response_model=List[Country])
 async def list_countries(session: AsyncSession = Depends(get_db)) -> List[Country]:
-    rows = (await session.execute(select(CountryModel).order_by(CountryModel.id))).scalars().all()
+    rows = (await session.execute(select(__import__('app.models', fromlist=['CountryModel']).CountryModel).order_by(__import__('app.models', fromlist=['CountryModel']).CountryModel.id))).scalars().all()
     return [Country.model_validate(row, from_attributes=True) for row in rows]
 
 
@@ -84,15 +83,22 @@ async def list_relationships(session: AsyncSession = Depends(get_db)) -> List[Re
     return [Relationship.model_validate(row, from_attributes=True) for row in rows]
 
 
+@app.get("/api/events")
+async def list_events(limit: int = 50, session: AsyncSession = Depends(get_db)) -> list[dict]:
+    limit = max(1, min(limit, 250))
+    rows = (await session.execute(select(EventModel).order_by(desc(EventModel.event_timestamp)).limit(limit))).scalars().all()
+    return [{"event_id": r.id, "event_type": r.event_type, "title": r.title, "description": r.description,
+             "timestamp": r.event_timestamp.isoformat(), "confidence": r.confidence, "status": r.status,
+             "source_count": r.source_count, "metadata": r.metadata_json} for r in rows]
+
+
 @app.post("/api/events", response_model=WorldStateResponse)
 async def ingest_event(event: EventCreate, session: AsyncSession = Depends(get_db)) -> WorldStateResponse:
-    actor_rows = []
+    for actor_id in event.actor_ids:
+        if await session.get(ActorModel, actor_id) is None:
+            raise HTTPException(status_code=400, detail=f"Unknown actor: {actor_id}")
     for actor_id in event.actor_ids:
         actor = await session.get(ActorModel, actor_id)
-        if actor is None:
-            raise HTTPException(status_code=400, detail=f"Unknown actor: {actor_id}")
-        actor_rows.append(actor)
-    for actor in actor_rows:
         actor.stability = max(0, min(1, actor.stability + event.impact.get("stability", 0)))
         actor.domestic_pressure = max(0, min(1, actor.domestic_pressure + event.impact.get("domestic_pressure", 0)))
     await session.commit()
@@ -101,5 +107,5 @@ async def ingest_event(event: EventCreate, session: AsyncSession = Depends(get_d
 
 @app.post("/api/engine/cycle")
 async def autonomous_cycle(query: str = "geopolitics", max_records: int = 25) -> dict:
-    """Run one real-data ingestion -> normalization -> deduplication cycle."""
+    """One cycle: real source -> normalization -> deduplication -> persistent world state."""
     return await run_cycle(query=query, max_records=max_records)
