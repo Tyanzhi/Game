@@ -126,3 +126,36 @@ class ActionModel(Base):
     status: Mapped[str] = mapped_column(String(32), default="proposed", nullable=False)
     effects: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+class GameInteractionModel(Base):
+    __tablename__ = "game_interactions"
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    simulation_id: Mapped[str | None] = mapped_column(ForeignKey("simulation_runs.id"))
+    actor_a_id: Mapped[str] = mapped_column(ForeignKey("actors.id"), nullable=False)
+    actor_b_id: Mapped[str] = mapped_column(ForeignKey("actors.id"), nullable=False)
+    game_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    information_state: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    strategies: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    payoff_matrix: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    selected_strategy_a: Mapped[str] = mapped_column(String(64), nullable=False)
+    selected_strategy_b: Mapped[str] = mapped_column(String(64), nullable=False)
+    outcome: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+class EngineStateModel(Base):
+    __tablename__ = "engine_states"
+    key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    value_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
+class ForecastModel(Base):
+    __tablename__ = "forecasts"
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    simulation_id: Mapped[str | None] = mapped_column(ForeignKey("simulation_runs.id"))
+    horizon: Mapped[int] = mapped_column(Integer, nullable=False)
+    target: Mapped[str] = mapped_column(String(128), nullable=False)
+    probabilities: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    drivers: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    uncertainty: Mapped[float] = mapped_column(Float, nullable=False)
+    model_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
