@@ -1,17 +1,16 @@
-"""Apply selected actor actions to the deterministic world state.
-
-Decisions only propose actions. This module is the controlled execution boundary.
-"""
+"""Controlled execution boundary between actor decisions and world state."""
 from __future__ import annotations
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from .models import ActionModel, ActorModel, RelationshipModel
 
-ALLOWED_ACTIONS = {
-    "observe", "diplomatic_outreach", "economic_adjustment", "defensive_posture", "public_statement"
-}
+ALLOWED_ACTIONS = {"observe", "diplomatic_outreach", "economic_adjustment", "defensive_posture", "public_statement"}
 
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
     return max(low, min(high, value))
+
+def _clamp_rel(value: float) -> float:
+    return max(-1.0, min(1.0, value))
 
 async def execute_action(session: AsyncSession, action_id: str) -> dict:
     action = await session.get(ActionModel, action_id)
@@ -24,7 +23,6 @@ async def execute_action(session: AsyncSession, action_id: str) -> dict:
         action.effects = {"reason": "action_not_allowed"}
         await session.flush()
         return {"action_id": action.id, "status": action.status, "effects": action.effects}
-
     actor = await session.get(ActorModel, action.actor_id)
     if actor is None:
         action.status = "rejected"
@@ -37,15 +35,11 @@ async def execute_action(session: AsyncSession, action_id: str) -> dict:
         actor.information_quality = _clamp(actor.information_quality + 0.015)
         effects["information_quality_delta"] = 0.015
     elif action.action_type == "diplomatic_outreach":
-        relationships = (await session.execute(RelationshipModel.__table__.select().where(RelationshipModel.source_actor_id == actor.id))).mappings().all()
-        changed = 0
-        for row in relationships:
-            rel = await session.get(RelationshipModel, row["id"])
-            if rel is not None:
-                rel.diplomatic = _clamp(rel.diplomatic + 0.025, -1.0, 1.0)
-                changed += 1
+        rels = (await session.execute(select(RelationshipModel).where(RelationshipModel.source_actor_id == actor.id))).scalars().all()
+        for rel in rels:
+            rel.diplomatic = _clamp_rel(rel.diplomatic + 0.025)
         actor.domestic_pressure = _clamp(actor.domestic_pressure - 0.005)
-        effects.update({"diplomatic_delta": 0.025, "relationships_changed": changed, "domestic_pressure_delta": -0.005})
+        effects.update({"diplomatic_delta": 0.025, "relationships_changed": len(rels), "domestic_pressure_delta": -0.005})
     elif action.action_type == "economic_adjustment":
         actor.economic_capacity = _clamp(actor.economic_capacity - 0.008)
         actor.stability = _clamp(actor.stability + 0.006)
