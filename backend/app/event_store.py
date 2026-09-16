@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .event_engine import NormalizedEvent
@@ -20,7 +19,7 @@ async def persist_events(session: AsyncSession, events: list[NormalizedEvent]) -
         if existing:
             duplicate_count += 1
             continue
-        row = EventModel(
+        session.add(EventModel(
             id=event.event_id,
             event_type=event.event_type,
             title=event.description[:500],
@@ -29,13 +28,13 @@ async def persist_events(session: AsyncSession, events: list[NormalizedEvent]) -
             confidence=event.confidence,
             status=event.status,
             source_count=event.source_count,
-        )
-        session.add(row)
+            metadata_json={"source_urls": list(event.source_urls)},
+        ))
         for source_id in event.source_ids:
             session.add(EventSourceModel(
                 event_id=event.event_id,
                 source_id=source_id,
-                source_url="",
+                source_url=next((u for u in event.source_urls if u), ""),
                 source_title=event.description[:500],
             ))
         new_count += 1
@@ -54,27 +53,17 @@ async def apply_events(session: AsyncSession, events: list[NormalizedEvent]) -> 
             if event.event_type in {"conflict", "protest", "sanction"}:
                 actor.domestic_pressure = clamp(actor.domestic_pressure + abs(delta))
                 actor.stability = clamp(actor.stability - abs(delta) * 0.5)
-            changes[actor_id] = {
-                "stability": actor.stability,
-                "domestic_pressure": actor.domestic_pressure,
-            }
+            changes[actor_id] = {"stability": actor.stability, "domestic_pressure": actor.domestic_pressure}
     return changes
 
 
 async def create_snapshot(session: AsyncSession, simulation_id: str, tick: int, changes: dict) -> None:
     session.add(WorldSnapshotModel(
-        tick=tick,
-        simulation_id=simulation_id,
-        model_version="world-state-v1",
-        dataset_version="live",
-        random_seed=0,
-        state_json={"actor_changes": changes},
+        tick=tick, simulation_id=simulation_id, model_version="world-state-v1",
+        dataset_version="live", random_seed=0, state_json={"actor_changes": changes},
     ))
     session.add(SimulationTickModel(
-        simulation_id=simulation_id,
-        tick=tick,
-        event_ids=list(changes.keys()),
-        state_changes=changes,
+        simulation_id=simulation_id, tick=tick, event_ids=list(changes.keys()), state_changes=changes,
     ))
 
 
