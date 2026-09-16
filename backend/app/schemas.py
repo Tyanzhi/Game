@@ -1,10 +1,7 @@
 from __future__ import annotations
-
 from datetime import datetime
 from typing import Dict, List
-
 from pydantic import BaseModel, Field
-
 
 class Actor(BaseModel):
     id: str
@@ -15,13 +12,15 @@ class Actor(BaseModel):
     diplomatic_capacity: float = Field(0.7, ge=0, le=1)
     security_capacity: float = Field(0.7, ge=0, le=1)
     domestic_pressure: float = Field(0.3, ge=0, le=1)
-
+    risk_tolerance: float = Field(0.5, ge=0, le=1)
+    strategic_patience: float = Field(0.5, ge=0, le=1)
+    escalation_threshold: float = Field(0.6, ge=0, le=1)
+    information_quality: float = Field(0.65, ge=0, le=1)
 
 class WorldStateResponse(BaseModel):
     tick: int
     timestamp: datetime
     actors: Dict[str, Actor]
-
 
 class EventCreate(BaseModel):
     event_id: str = Field(min_length=1, max_length=128)
