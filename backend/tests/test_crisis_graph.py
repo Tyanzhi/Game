@@ -45,7 +45,8 @@ def test_crisis_can_contagiously_reach_connected_actor():
     )
     nodes = state["crisis_graph"]["nodes"]
     participants = next(iter(nodes.values()))["participants"]
-    assert "C" in participants or len(state["crisis_graph"]["edges"]) >= 0
+    assert "C" in participants
+    assert any(edge["mechanism"] == "crisis_contagion" for edge in state["crisis_graph"]["edges"])
 
 
 def test_secondary_crisis_uses_parent_linkage():
