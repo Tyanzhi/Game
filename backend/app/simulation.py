@@ -82,16 +82,26 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
 
         for actor_id, actor in state.actors.items():
             prediction = forecast(
-                f'{actor_id}:stability', actor.values.get('stability', 0.7),
+                f'{actor_id}:stability',
+                actor.values,
                 {'economic': changes.get(actor_id, {}).get('economic_capacity', 0),
                  'social': changes.get(actor_id, {}).get('domestic_pressure', 0) * -0.5},
-                5, seed,
+                5, seed + tick,
             )
+            probabilities = prediction['probabilities']
+            expected = (
+                probabilities['low'] * 0.25
+                + probabilities['medium'] * 0.50
+                + probabilities['high'] * 0.75
+            )
+            uncertainty = prediction['uncertainty']
             session.add(ForecastModel(
-                simulation_id=simulation_id, tick=tick, target=prediction.target,
-                horizon=prediction.horizon, expected=prediction.expected,
-                lower=prediction.lower, upper=prediction.upper,
-                confidence=prediction.confidence, drivers=prediction.drivers,
+                simulation_id=simulation_id, tick=tick, target=prediction['target'],
+                horizon=prediction['horizon'], expected=expected,
+                lower=max(0.0, expected - uncertainty),
+                upper=min(1.0, expected + uncertainty),
+                confidence=max(0.0, 1.0 - uncertainty),
+                drivers={'drivers': prediction['drivers'], 'probabilities': probabilities},
             ))
 
         await sync_world_state_to_db(session, state)
