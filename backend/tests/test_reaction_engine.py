@@ -31,10 +31,11 @@ class _Session:
         sql = str(query)
         if "FROM actors" in sql:
             return _ScalarResult(self.actors)
-        source = getattr(query, "_where_criteria", ())
-        text = " ".join(str(item) for item in source)
+        params = query.compile().params
+        source = params.get("source_actor_id_1")
+        target = params.get("target_actor_id_1")
         for rel in self.relationships:
-            if rel.source_actor_id in text and rel.target_actor_id in text:
+            if rel.source_actor_id == source and rel.target_actor_id == target:
                 return _ScalarResult([rel])
         return _ScalarResult([])
 
