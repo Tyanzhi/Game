@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from .action_executor import execute_actions
 from .cascade_engine import CascadeEngine, Effect
+from .crisis_graph import CrisisGraph
 from .decision_engine import decide_all
 from .engines import conflict, economic, energy, social
 from .event_bus import event_bus
@@ -109,8 +110,18 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
             action_results = ctx.phase_results.get("action", {}).get("actions", [])
             propagation = EventPropagation()
             actor_values = {actor_id: actor.values for actor_id, actor in state.actors.items()}
-            propagated_events = propagation.propagate(
+            crisis_graph = CrisisGraph()
+            secondary_events = crisis_graph.advance(
+                state.metadata,
                 normalized,
+                actor_values,
+                state.metadata.get("relationships", {}),
+                tick,
+                seed,
+            )
+            all_events = list(normalized) + secondary_events
+            propagated_events = propagation.propagate(
+                all_events,
                 actor_values,
                 state.metadata.get("relationships", {}),
                 seed + tick,
@@ -148,7 +159,7 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
                     state.apply_delta(effect.target, effect.field, effect.delta)
                     changes.setdefault(effect.target, {})[effect.field] = changes.setdefault(effect.target, {}).get(effect.field, 0) + effect.delta
                 session.add(EffectModel(simulation_id=simulation_id, tick=tick, source=effect.source, target=effect.target, field=effect.field, delta=effect.delta, confidence=effect.confidence, depth=effect.depth, mechanism=effect.mechanism))
-            result = {"count": len(cascaded), "initial_count": len(initial_effects), "event_propagation": len(propagated_events), "reactions": len(reactions), "unexpected_shocks": len(shocks), "truncated": truncated}
+            result = {"count": len(cascaded), "initial_count": len(initial_effects), "event_propagation": len(propagated_events), "secondary_crises": len(secondary_events), "crisis_nodes": len(state.metadata.get("crisis_graph", {}).get("nodes", {})), "reactions": len(reactions), "unexpected_shocks": len(shocks), "truncated": truncated}
             await publish("cascade", result)
             return result
         async def forecast_phase(ctx):
