@@ -9,6 +9,7 @@ from .decision_engine import decide_all
 from .engines import conflict, economic, energy, social
 from .event_bus import event_bus
 from .event_engine import normalize
+from .event_propagation import EventPropagation
 from .forecasting_engine import forecast
 from .integration_state import load_world_state, persist_tick, sync_world_state_to_db
 from .models import ActorPerceptionModel, EffectModel, ForecastModel, SimulationRunModel
@@ -106,6 +107,14 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
                 source, target = key.split(":", 1)
                 adjacency.setdefault(source, []).append(target)
             action_results = ctx.phase_results.get("action", {}).get("actions", [])
+            propagation = EventPropagation()
+            actor_values = {actor_id: actor.values for actor_id, actor in state.actors.items()}
+            propagated_events = propagation.propagate(
+                normalized,
+                actor_values,
+                state.metadata.get("relationships", {}),
+                seed + tick,
+            )
             reactions, shocks = await plan_reactions(session, action_results, simulation_id, seed + tick)
             if reactions:
                 reaction_actions = await execute_actions(session, [item["action_id"] for item in reactions])
@@ -113,6 +122,18 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
                 ctx.phase_results["action"]["actions"] = action_results
                 ctx.phase_results["action"]["count"] = len(action_results)
             initial_effects = _action_effects_to_initial_effects(action_results)
+            initial_effects.extend(
+                Effect(
+                    source=effect.source,
+                    target=effect.target,
+                    field=effect.field,
+                    delta=effect.delta,
+                    confidence=effect.confidence,
+                    depth=effect.depth,
+                    mechanism=effect.mechanism,
+                )
+                for effect in propagated_events
+            )
             initial_effects.extend(Effect(**shock) for shock in shocks)
             cascaded, truncated = CascadeEngine().run(initial_effects, adjacency)
             for effect in cascaded:
@@ -122,7 +143,7 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
                     state.apply_delta(effect.target, effect.field, effect.delta)
                     changes.setdefault(effect.target, {})[effect.field] = changes.setdefault(effect.target, {}).get(effect.field, 0) + effect.delta
                 session.add(EffectModel(simulation_id=simulation_id, tick=tick, source=effect.source, target=effect.target, field=effect.field, delta=effect.delta, confidence=effect.confidence, depth=effect.depth, mechanism=effect.mechanism))
-            result = {"count": len(cascaded), "initial_count": len(initial_effects), "reactions": len(reactions), "unexpected_shocks": len(shocks), "truncated": truncated}
+            result = {"count": len(cascaded), "initial_count": len(initial_effects), "event_propagation": len(propagated_events), "reactions": len(reactions), "unexpected_shocks": len(shocks), "truncated": truncated}
             await publish("cascade", result)
             return result
         async def forecast_phase(ctx):
