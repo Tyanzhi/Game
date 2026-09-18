@@ -59,6 +59,15 @@ async def plan_reactions(
     """
     rng = random.Random(seed)
     actors = {
+    # Event taxonomy: the shock is causal rather than a blind stat mutation.
+    shock_types = (
+        ("economic_crisis", "economic_capacity", -1.0, "economic"),
+        ("energy_disruption", "economic_capacity", -1.0, "energy"),
+        ("internal_crisis", "stability", -1.0, "social"),
+        ("intelligence_failure", "information_quality", -1.0, "information"),
+        ("natural_disaster", "stability", -1.0, "environment"),
+        ("security_incident", "security_capacity", -1.0, "security"),
+    )
         actor.id: actor
         for actor in (
             await session.execute(select(ActorModel).order_by(ActorModel.id))
@@ -178,11 +187,8 @@ async def plan_reactions(
     if actors and rng.random() < shock_rate:
         actor_ids = sorted(actors)
         affected = actor_ids[rng.randrange(len(actor_ids))]
-        fields = ("stability", "economic_capacity", "security_capacity", "domestic_pressure")
-        field = fields[rng.randrange(len(fields))]
-        magnitude = round(rng.uniform(0.006, 0.025), 6)
-        if field != "domestic_pressure":
-            magnitude *= -1.0
+        shock_name, field, direction, domain = shock_types[rng.randrange(len(shock_types))]
+        magnitude = round(rng.uniform(0.006, 0.025) * direction, 6)
         shocks.append(
             {
                 "source": "system",
@@ -192,7 +198,25 @@ async def plan_reactions(
                 "confidence": round(rng.uniform(0.45, 0.75), 6),
                 "depth": 0,
                 "mechanism": "unexpected_shock",
+                "event_type": shock_name,
+                "domain": domain,
+                "duration": rng.randint(1, 4),
             }
         )
+        # Secondary causal effect: crises increase domestic pressure.
+        if shock_name in {"economic_crisis", "energy_disruption", "internal_crisis", "natural_disaster"}:
+            shocks.append(
+                {
+                    "source": "system",
+                    "target": affected,
+                    "field": "domestic_pressure",
+                    "delta": round(rng.uniform(0.004, 0.018), 6),
+                    "confidence": round(rng.uniform(0.55, 0.85), 6),
+                    "depth": 0,
+                    "mechanism": "shock_secondary_effect",
+                    "parent_event": shock_name,
+                    "duration": rng.randint(1, 4),
+                }
+            )
 
     return reaction_rows, shocks
