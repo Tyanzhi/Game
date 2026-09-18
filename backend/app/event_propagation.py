@@ -45,7 +45,7 @@ class EventPropagation:
 
     FIELD_MAP = {
         "economic": "economic_capacity",
-        "trade": "trade",
+        "trade": "trade_resilience",
         "energy": "energy_security",
         "stability": "stability",
         "domestic_pressure": "domestic_pressure",
