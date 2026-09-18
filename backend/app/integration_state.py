@@ -25,7 +25,7 @@ class ActorState:
 class WorldState:
     tick: int = 0
     actors: dict = field(default_factory=dict)
-    metadata: dict = field(default_factory=lambda: {'relationships': {}})
+    metadata: dict = field(default_factory=lambda: {'relationships': {}, 'markets': {'global_trade': 0.0, 'energy_price': 0.0, 'financial_stress': 0.0, 'commodity_supply': 0.0}})
 
     def apply_delta(self, actor_id, field, delta):
         if actor_id in self.actors:
@@ -52,6 +52,7 @@ async def load_world_state(session, simulation_id, tick=0, seed=0):
             {field: float(getattr(actor, field, 0.0) or 0.0) for field in TRACKED_FIELDS},
         )
     relationships = (await session.execute(select(RelationshipModel))).scalars().all()
+    state.metadata['markets'] = {'global_trade': 0.0, 'energy_price': 0.0, 'financial_stress': 0.0, 'commodity_supply': 0.0}
     state.metadata['relationships'] = {
         f'{rel.source_actor_id}:{rel.target_actor_id}': {
             'diplomatic': float(rel.diplomatic or 0.0),
