@@ -142,7 +142,6 @@ async def plan_reactions(
     for index, plan in enumerate(plans):
         decision_id = f"reaction-decision-{simulation_id}-{seed}-{index}"
         action_id = f"reaction-action-{simulation_id}-{seed}-{index}"
-        # The source action is resolved by the caller and carried in metadata.
         source_action_id = source_actions[index % len(source_actions)]["action_id"] if source_actions else ""
         effects = {
             "target_actor_id": plan.target_actor_id,
