@@ -58,8 +58,6 @@ async def plan_reactions(
     in the same pass.
     """
     rng = random.Random(seed)
-    actors = {
-    # Event taxonomy: the shock is causal rather than a blind stat mutation.
     shock_types = (
         ("economic_crisis", "economic_capacity", -1.0, "economic"),
         ("energy_disruption", "economic_capacity", -1.0, "energy"),
@@ -68,6 +66,7 @@ async def plan_reactions(
         ("natural_disaster", "stability", -1.0, "environment"),
         ("security_incident", "security_capacity", -1.0, "security"),
     )
+    actors = {
         actor.id: actor
         for actor in (
             await session.execute(select(ActorModel).order_by(ActorModel.id))
