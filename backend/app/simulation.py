@@ -137,8 +137,13 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
             initial_effects.extend(Effect(**shock) for shock in shocks)
             cascaded, truncated = CascadeEngine().run(initial_effects, adjacency)
             for effect in cascaded:
-                if effect.field == "diplomatic":
+                if effect.field == "diplomatic" or effect.field == "trade":
                     state.apply_relationship_delta(effect.source, effect.target, effect.field, effect.delta)
+                elif effect.target == "market:global" and effect.field.startswith("market:"):
+                    market_field = effect.field.split(":", 1)[1]
+                    markets = state.metadata.setdefault("markets", {})
+                    markets[market_field] = float(markets.get(market_field, 0.0)) + effect.delta
+                    changes.setdefault("markets", {})[market_field] = markets[market_field]
                 else:
                     state.apply_delta(effect.target, effect.field, effect.delta)
                     changes.setdefault(effect.target, {})[effect.field] = changes.setdefault(effect.target, {}).get(effect.field, 0) + effect.delta
