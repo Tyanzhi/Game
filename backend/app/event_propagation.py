@@ -34,6 +34,15 @@ class EventPropagation:
         "security_incident": {"security": -0.08, "stability": -0.025, "diplomatic": -0.055},
     }
 
+    MARKET_PROFILES = {
+        "economic_crisis": {"global_trade": -0.06, "financial_stress": 0.08},
+        "energy_disruption": {"energy_price": 0.10, "global_trade": -0.04, "commodity_supply": -0.07},
+        "internal_crisis": {"financial_stress": 0.025},
+        "intelligence_failure": {"financial_stress": 0.015},
+        "natural_disaster": {"commodity_supply": -0.06, "global_trade": -0.025},
+        "security_incident": {"financial_stress": 0.035, "global_trade": -0.02},
+    }
+
     FIELD_MAP = {
         "economic": "economic_capacity",
         "trade": "trade",
@@ -72,13 +81,18 @@ class EventPropagation:
             if not profile:
                 continue
             involved = tuple(event.actors)
+            for market_field, market_delta in self.MARKET_PROFILES.get(event.event_type, {}).items():
+                output.append(PropagationEffect(
+                    event.event_id, "system", "market:global", "market", f"market:{market_field}",
+                    market_delta * event.confidence, event.confidence, "market_propagation", event.confidence
+                ))
             for actor_id, actor in actors.items():
                 relation = 0.0
                 for source_id in involved:
                     rel = relationships.get(f"{actor_id}:{source_id}", {})
                     relation = max(relation, abs(float(rel.get("diplomatic", 0.0))))
                 for domain, base in profile.items():
-                    perception = self._perception(actor, domain, relation, event.confidence, seed + hash((event.event_id, actor_id, domain)) % 100000)
+                    perception = self._perception(actor, domain, relation, event.confidence, seed + int(hashlib.sha256(f"{event.event_id}:{actor_id}:{domain}".encode()).hexdigest()[:8], 16))
                     delta = base * perception
                     if abs(delta) >= self.threshold:
                         field = self.FIELD_MAP[domain]
