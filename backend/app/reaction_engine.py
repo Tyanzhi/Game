@@ -90,7 +90,10 @@ async def plan_reactions(
 
         diplomatic_delta = float(effects.get("diplomatic_delta") or 0.0)
         pressure = max(0.0, -diplomatic_delta) + max(0.0, diplomatic_delta * -2.0)
-        threat = max(0.0, -diplomatic) + pressure
+        economic_signal = abs(float(effects.get("economic_capacity_delta") or 0.0))
+        security_signal = abs(float(effects.get("security_capacity_delta") or 0.0))
+        information_signal = abs(float(effects.get("information_quality_delta") or 0.0))
+        threat = max(0.0, -diplomatic) + pressure + economic_signal * 2.0 + security_signal * 1.5
         response_intensity = _clamp(
             0.25
             + threat * 0.65
@@ -98,15 +101,18 @@ async def plan_reactions(
             - float(target_actor.strategic_patience or 0.0) * 0.12
         )
 
-        if response_intensity < 0.34:
-            selected = "diplomatic_outreach"
-            reason = "low_escalation_response"
-        elif threat > float(target_actor.escalation_threshold or 0.6):
+        if information_signal > 0.0 and float(target_actor.information_quality or 0.0) < 0.55:
+            selected = "observe"
+            reason = "intelligence_uncertainty_response"
+        elif security_signal > 0.0 or threat > float(target_actor.escalation_threshold or 0.6):
             selected = "defensive_posture"
             reason = "security_threshold_response"
-        elif float(target_actor.economic_capacity or 0.0) > 0.25 and threat > 0.45:
+        elif economic_signal > 0.0 and float(target_actor.economic_capacity or 0.0) > 0.25:
             selected = "economic_adjustment"
             reason = "economic_pressure_response"
+        elif response_intensity < 0.34:
+            selected = "diplomatic_outreach"
+            reason = "low_escalation_response"
         else:
             selected = "public_statement"
             reason = "political_signal_response"
