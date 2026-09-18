@@ -13,6 +13,7 @@ from .forecasting_engine import forecast
 from .integration_state import load_world_state, persist_tick, sync_world_state_to_db
 from .models import ActorPerceptionModel, EffectModel, ForecastModel, SimulationRunModel
 from .perception_engine import PerceptionEngine
+from .reaction_engine import plan_reactions
 from .realtime_pipeline import save_world_version
 from .simulation_tick import SimulationTickEngine, TickContext
 
@@ -105,7 +106,14 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
                 source, target = key.split(":", 1)
                 adjacency.setdefault(source, []).append(target)
             action_results = ctx.phase_results.get("action", {}).get("actions", [])
+            reactions, shocks = await plan_reactions(session, action_results, simulation_id, seed + tick)
+            if reactions:
+                reaction_actions = await execute_actions(session, [item["action_id"] for item in reactions])
+                action_results = action_results + reaction_actions
+                ctx.phase_results["action"]["actions"] = action_results
+                ctx.phase_results["action"]["count"] = len(action_results)
             initial_effects = _action_effects_to_initial_effects(action_results)
+            initial_effects.extend(Effect(**shock) for shock in shocks)
             cascaded, truncated = CascadeEngine().run(initial_effects, adjacency)
             for effect in cascaded:
                 if effect.field == "diplomatic":
@@ -114,7 +122,7 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
                     state.apply_delta(effect.target, effect.field, effect.delta)
                     changes.setdefault(effect.target, {})[effect.field] = changes.setdefault(effect.target, {}).get(effect.field, 0) + effect.delta
                 session.add(EffectModel(simulation_id=simulation_id, tick=tick, source=effect.source, target=effect.target, field=effect.field, delta=effect.delta, confidence=effect.confidence, depth=effect.depth, mechanism=effect.mechanism))
-            result = {"count": len(cascaded), "initial_count": len(initial_effects), "truncated": truncated}
+            result = {"count": len(cascaded), "initial_count": len(initial_effects), "reactions": len(reactions), "unexpected_shocks": len(shocks), "truncated": truncated}
             await publish("cascade", result)
             return result
         async def forecast_phase(ctx):
