@@ -1,0 +1,180 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+import hashlib
+import random
+
+
+@dataclass
+class CrisisNode:
+    crisis_id: str
+    root_event_id: str
+    event_type: str
+    phase: str
+    intensity: float
+    duration: int
+    tick_started: int
+    participants: tuple[str, ...]
+    escalation: float = 0.0
+    contagion: float = 0.0
+    uncertainty: float = 0.0
+
+
+class CrisisGraph:
+    """
+    Multi-tick crisis lifecycle.
+
+    A crisis is a graph, not a single random modifier. Each tick it can:
+    - intensify or decay;
+    - move through lifecycle phases;
+    - generate secondary events;
+    - expand to connected actors;
+    - terminate or branch into a new crisis.
+    All branching is deterministic for a given seed.
+    """
+
+    PHASES = ("emerging", "escalating", "peak", "contained", "decaying", "resolved")
+
+    BRANCHES = {
+        "economic_crisis": ("internal_crisis", "security_incident"),
+        "energy_disruption": ("economic_crisis", "internal_crisis"),
+        "internal_crisis": ("security_incident", "economic_crisis"),
+        "intelligence_failure": ("security_incident", "diplomatic_crisis"),
+        "natural_disaster": ("economic_crisis", "internal_crisis"),
+        "security_incident": ("diplomatic_crisis", "internal_crisis"),
+        "diplomatic_crisis": ("security_incident", "economic_crisis"),
+    }
+
+    def _rng(self, seed: int, crisis_id: str, tick: int) -> random.Random:
+        raw = f"{seed}:{crisis_id}:{tick}".encode()
+        stable = int(hashlib.sha256(raw).hexdigest()[:16], 16)
+        return random.Random(stable)
+
+    def _phase(self, intensity: float, age: int) -> str:
+        if intensity < 0.08:
+            return "resolved"
+        if intensity < 0.22:
+            return "decaying" if age > 2 else "contained"
+        if intensity < 0.55:
+            return "emerging" if age <= 1 else "escalating"
+        if intensity < 0.82:
+            return "escalating"
+        return "peak"
+
+    def advance(
+        self,
+        state_metadata: dict,
+        events,
+        actors: dict[str, dict],
+        relationships: dict[str, dict],
+        tick: int,
+        seed: int,
+    ) -> list:
+        graph = state_metadata.setdefault("crisis_graph", {"nodes": {}, "edges": [], "history": []})
+        nodes = graph.setdefault("nodes", {})
+        generated = []
+
+        for event in events:
+            if event.event_type not in self.BRANCHES:
+                continue
+            cid = f"crisis:{event.event_id}"
+            if cid not in nodes:
+                nodes[cid] = CrisisNode(
+                    cid, event.event_id, event.event_type, "emerging",
+                    max(0.1, min(1.0, event.confidence)),
+                    1, tick, tuple(event.actors),
+                    uncertainty=1.0 - event.confidence,
+                ).__dict__
+
+        for cid, raw in list(nodes.items()):
+            age = max(0, tick - int(raw["tick_started"]))
+            rng = self._rng(seed, cid, tick)
+            intensity = float(raw["intensity"])
+            phase = raw["phase"]
+
+            # External pressure and actor interdependence can sustain a crisis.
+            connected = set(raw.get("participants", ()))
+            network_pressure = 0.0
+            for actor_id in connected:
+                for key, rel in relationships.items():
+                    if key.startswith(actor_id + ":") or key.endswith(":" + actor_id):
+                        network_pressure += abs(float(rel.get("diplomatic", 0.0))) * 0.002
+
+            drift = rng.uniform(-0.09, 0.10) + network_pressure
+            if phase == "decaying":
+                drift -= 0.06
+            intensity = max(0.0, min(1.0, intensity + drift))
+
+            # Crisis contagion reaches connected actors without forcing identical effects.
+            if connected:
+                for actor_id in actors:
+                    if actor_id in connected:
+                        continue
+                    link = max(
+                        abs(float(relationships.get(f"{actor_id}:{p}", {}).get("diplomatic", 0.0)))
+                        + abs(float(relationships.get(f"{actor_id}:{p}", {}).get("economic", 0.0)))
+                        for p in connected
+                    )
+                    if link > 0.25 and rng.random() < min(0.65, intensity * link * 0.7):
+                        connected.add(actor_id)
+                        graph["edges"].append({
+                            "from": cid,
+                            "to": actor_id,
+                            "tick": tick,
+                            "mechanism": "crisis_contagion",
+                            "strength": round(intensity * link, 6),
+                        })
+
+            phase = self._phase(intensity, age)
+            raw["intensity"] = round(intensity, 6)
+            raw["phase"] = phase
+            raw["duration"] = age + 1
+            raw["participants"] = sorted(connected)
+            raw["escalation"] = round(max(0.0, intensity - 0.35), 6)
+            raw["contagion"] = round(min(1.0, len(connected) / max(1, len(actors))), 6)
+            raw["uncertainty"] = round(max(0.0, 1.0 - float(raw.get("uncertainty", 0.0)) * 0.9), 6)
+
+            if phase == "resolved":
+                continue
+
+            branches = self.BRANCHES.get(raw["event_type"], ())
+            if branches and rng.random() < min(0.45, intensity * 0.35):
+                branch_type = branches[rng.randrange(len(branches))]
+                branch_id = f"{cid}:branch:{age}"
+                if branch_id not in nodes:
+                    participants = tuple(sorted(connected))
+                    nodes[branch_id] = CrisisNode(
+                        branch_id, raw["root_event_id"], branch_type,
+                        "emerging", max(0.08, intensity * rng.uniform(0.28, 0.55)),
+                        1, tick, participants,
+                        escalation=intensity * 0.25,
+                        contagion=raw["contagion"],
+                        uncertainty=min(1.0, raw["uncertainty"] + 0.1),
+                    ).__dict__
+                    graph["edges"].append({
+                        "from": cid,
+                        "to": branch_id,
+                        "tick": tick,
+                        "mechanism": "secondary_crisis",
+                        "strength": raw["intensity"],
+                    })
+                    generated.append(
+                        type("SyntheticEvent", (), {
+                            "event_id": f"{branch_id}:event:{tick}",
+                            "event_type": branch_type,
+                            "actors": participants,
+                            "confidence": max(0.35, 1.0 - raw["uncertainty"]),
+                            "description": f"Secondary crisis generated from {raw['event_type']}",
+                            "metadata": {"crisis_id": branch_id, "parent_crisis_id": cid},
+                        })()
+                    )
+
+            graph["history"].append({
+                "crisis_id": cid,
+                "tick": tick,
+                "phase": phase,
+                "intensity": raw["intensity"],
+                "participants": raw["participants"],
+            })
+
+        return generated
