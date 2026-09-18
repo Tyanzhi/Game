@@ -35,11 +35,20 @@ async def execute_action(session: AsyncSession, action_id: str) -> dict:
         actor.information_quality = _clamp(actor.information_quality + 0.015)
         effects["information_quality_delta"] = 0.015
     elif action.action_type == "diplomatic_outreach":
-        rels = (await session.execute(select(RelationshipModel).where(RelationshipModel.source_actor_id == actor.id))).scalars().all()
+        target_actor_id = (action.effects or {}).get("target_actor_id")
+        query = select(RelationshipModel).where(RelationshipModel.source_actor_id == actor.id)
+        if target_actor_id:
+            query = query.where(RelationshipModel.target_actor_id == target_actor_id)
+        rels = (await session.execute(query)).scalars().all()
         for rel in rels:
             rel.diplomatic = _clamp_rel(rel.diplomatic + 0.025)
         actor.domestic_pressure = _clamp(actor.domestic_pressure - 0.005)
-        effects.update({"diplomatic_delta": 0.025, "relationships_changed": len(rels), "domestic_pressure_delta": -0.005})
+        effects.update({
+            "target_actor_id": target_actor_id,
+            "diplomatic_delta": 0.025,
+            "relationships_changed": len(rels),
+            "domestic_pressure_delta": -0.005,
+        })
     elif action.action_type == "economic_adjustment":
         actor.economic_capacity = _clamp(actor.economic_capacity - 0.008)
         actor.stability = _clamp(actor.stability + 0.006)
