@@ -51,7 +51,7 @@ async def load_world_state(session, simulation_id, tick=0, seed=0):
         f'{rel.source_actor_id}:{rel.target_actor_id}': {
             'diplomatic': float(rel.diplomatic or 0.0),
             'economic': float(rel.economic or 0.0),
-            'security': float(rel.security or 0.0),
+            'military': float(rel.military or 0.0),
         }
         for rel in relationships
     }
