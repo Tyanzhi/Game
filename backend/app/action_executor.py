@@ -17,18 +17,18 @@ async def execute_action(session: AsyncSession, action_id: str) -> dict:
     if action is None:
         raise ValueError(f"Unknown action: {action_id}")
     if action.status == "executed":
-        return {"action_id": action.id, "status": "executed", "effects": action.effects}
+        return {"action_id": action.id, "actor_id": action.actor_id, "status": "executed", "effects": action.effects}
     if action.action_type not in ALLOWED_ACTIONS:
         action.status = "rejected"
         action.effects = {"reason": "action_not_allowed"}
         await session.flush()
-        return {"action_id": action.id, "status": action.status, "effects": action.effects}
+        return {"action_id": action.id, "actor_id": action.actor_id, "status": action.status, "effects": action.effects}
     actor = await session.get(ActorModel, action.actor_id)
     if actor is None:
         action.status = "rejected"
         action.effects = {"reason": "actor_not_found"}
         await session.flush()
-        return {"action_id": action.id, "status": action.status, "effects": action.effects}
+        return {"action_id": action.id, "actor_id": action.actor_id, "status": action.status, "effects": action.effects}
 
     effects: dict[str, object] = {"action": action.action_type}
     if action.action_type == "observe":
@@ -55,7 +55,7 @@ async def execute_action(session: AsyncSession, action_id: str) -> dict:
     action.status = "executed"
     action.effects = effects
     await session.flush()
-    return {"action_id": action.id, "status": action.status, "effects": effects}
+    return {"action_id": action.id, "actor_id": action.actor_id, "status": action.status, "effects": effects}
 
 async def execute_actions(session: AsyncSession, action_ids: list[str]) -> list[dict]:
     return [await execute_action(session, action_id) for action_id in action_ids]
