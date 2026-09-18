@@ -16,5 +16,5 @@ jobs:
           python-version: '3.11'
       - run: pip install -r requirements.txt
       - run: python -m compileall app
-      - run: pytest -q
-      - run: PYTHONPATH=. python -c "from app.main import app; print(app.title)"
+      - run: PYTHONPATH=.:.. pytest -q
+      - run: PYTHONPATH=.:.. python -c "from app.main import app; print(app.title)"
