@@ -1,22 +1,26 @@
 from __future__ import annotations
-from uuid import uuid4
+
 from datetime import datetime, timezone
-from .models import SimulationRunModel, ActorPerceptionModel, EffectModel, ForecastModel
-from .integration_state import load_world_state, sync_world_state_to_db, persist_tick
-from .event_engine import normalize
-from .decision_engine import decide_all
+from uuid import uuid4
+
 from .action_executor import execute_actions
 from .cascade_engine import CascadeEngine
-from .perception_engine import PerceptionEngine
+from .decision_engine import decide_all
+from .engines import conflict, economic, energy, social
+from .event_bus import event_bus
+from .event_engine import normalize
 from .forecasting_engine import forecast
-from .engines import economic, social, conflict, energy
+from .integration_state import load_world_state, persist_tick, sync_world_state_to_db
+from .models import ActorPerceptionModel, EffectModel, ForecastModel, SimulationRunModel
+from .perception_engine import PerceptionEngine
 from .realtime_pipeline import save_world_version
-from .simulation_tick import TickContext
+from .simulation_tick import PHASES, SimulationTickEngine, TickContext
+
 
 async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_events=None, broadcast=None):
     ticks = max(1, min(120, int(ticks)))
-    simulation_id = simulation_id or f'sim-{uuid4().hex}'
-    run = SimulationRunModel(id=simulation_id, mode='simulation', status='running', query='local')
+    simulation_id = simulation_id or f"sim-{uuid4().hex}"
+    run = SimulationRunModel(id=simulation_id, mode="simulation", status="running", query="local")
     session.add(run)
     await session.flush()
 
@@ -24,105 +28,148 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
     normalized = normalize(raw_events or [])
     event_ids = [event.event_id for event in normalized]
     from .event_store import persist_events
-    await persist_events(session, normalized)
 
+    await persist_events(session, normalized)
     history = []
     parent_hash = None
+
     for tick in range(1, ticks + 1):
         state.tick = tick
-        phase, changes = {}, {}
-        TickContext(simulation_id, tick, seed + tick)
-        pe = PerceptionEngine()
-        for actor_id, actor in state.actors.items():
-            facts = [
-                {
-                    'fact_id': event.event_id,
-                    'value': event.description,
-                    'confidence': event.confidence,
-                    'source_ids': [source.get('source_id', 'unknown') for source in (event.metadata or {}).get('sources', [])],
-                }
-                for event in normalized
-            ]
-            perception = pe.build(actor_id, facts, actor.values.get('information_quality', 0.7))
-            session.add(ActorPerceptionModel(
-                simulation_id=simulation_id, tick=tick, actor_id=actor_id,
-                facts_json={key: value.__dict__ for key, value in perception.facts.items()},
-            ))
+        changes: dict = {}
+        phase_data: dict = {}
+        context = TickContext(simulation_id, tick, seed + tick)
 
-        decisions = await decide_all(session, simulation_id)
-        phase['perception'] = len(state.actors)
-        phase['decision'] = len(decisions)
-        actions = await execute_actions(session, [decision['action_id'] for decision in decisions])
-        phase['action'] = actions
-
-        adjacency = {}
-        for key in state.metadata.get('relationships', {}):
-            source, target = key.split(':', 1)
-            adjacency.setdefault(source, []).append(target)
-
-        # Action execution already updates the database actor values. Only
-        # engine-generated deltas are applied to the in-memory state here.
-        cascaded, truncated = CascadeEngine().run([], adjacency)
-        phase['cascade'] = {'count': len(cascaded), 'truncated': truncated}
-        for effect in cascaded:
-            state.apply_delta(effect.target, effect.field, effect.delta)
-            session.add(EffectModel(
-                simulation_id=simulation_id, tick=tick, source=effect.source,
-                target=effect.target, field=effect.field, delta=effect.delta,
-                confidence=effect.confidence, depth=effect.depth, mechanism=effect.mechanism,
-            ))
-
-        state_results = {actor_id: actor for actor_id, actor in state.actors.items()}
-        for bundle in (economic(state_results), social(state_results), energy(state_results), conflict(state_results)):
-            for actor_id, result in bundle.items():
-                for field, delta in result.changes.items():
-                    state.apply_delta(actor_id, field, delta)
-                    changes.setdefault(actor_id, {})[field] = changes.setdefault(actor_id, {}).get(field, 0) + delta
-        phase['engines'] = changes
-
-        for actor_id, actor in state.actors.items():
-            prediction = forecast(
-                f'{actor_id}:stability',
-                actor.values,
-                {'economic': changes.get(actor_id, {}).get('economic_capacity', 0),
-                 'social': changes.get(actor_id, {}).get('domestic_pressure', 0) * -0.5},
-                5, seed + tick,
+        async def publish(phase: str, result):
+            await event_bus.publish(
+                f"simulation.{phase}",
+                {"simulation_id": simulation_id, "tick": tick, "phase": phase, "result": result},
             )
-            probabilities = prediction['probabilities']
-            expected = (
-                probabilities['low'] * 0.25
-                + probabilities['medium'] * 0.50
-                + probabilities['high'] * 0.75
-            )
-            uncertainty = prediction['uncertainty']
-            session.add(ForecastModel(
-                simulation_id=simulation_id, tick=tick, target=prediction['target'],
-                horizon=prediction['horizon'], expected=expected,
-                lower=max(0.0, expected - uncertainty),
-                upper=min(1.0, expected + uncertainty),
-                confidence=max(0.0, 1.0 - uncertainty),
-                drivers={'drivers': prediction['drivers'], 'probabilities': probabilities},
-            ))
 
-        await sync_world_state_to_db(session, state)
-        await persist_tick(session, simulation_id, state, changes, event_ids, phase)
-        snapshot = state.snapshot()
-        previous_hash = parent_hash
-        snapshot_hash = await save_world_version(
-            session, simulation_id, tick, snapshot,
-            parent_hash=previous_hash, dataset_version='live',
-        )
-        parent_hash = snapshot_hash
-        phase['snapshot'] = {'state_hash': snapshot_hash, 'parent_hash': previous_hash}
-        history.append(snapshot)
+        async def ingest(ctx):
+            result = {"events": len(normalized), "event_ids": event_ids}
+            await publish("ingest", result)
+            return result
+
+        async def state_update(ctx):
+            result = {"tick": state.tick, "actors": len(state.actors)}
+            await publish("state_update", result)
+            return result
+
+        async def perception(ctx):
+            pe = PerceptionEngine()
+            count = 0
+            for actor_id, actor in state.actors.items():
+                facts = [
+                    {
+                        "fact_id": event.event_id,
+                        "value": event.description,
+                        "confidence": event.confidence,
+                        "source_ids": [source.get("source_id", "unknown") for source in (event.metadata or {}).get("sources", [])],
+                    }
+                    for event in normalized
+                ]
+                perception_result = pe.build(actor_id, facts, actor.values.get("information_quality", 0.7))
+                session.add(ActorPerceptionModel(
+                    simulation_id=simulation_id,
+                    tick=tick,
+                    actor_id=actor_id,
+                    facts_json={key: value.__dict__ for key, value in perception_result.facts.items()},
+                ))
+                count += 1
+            result = {"actors": count}
+            await publish("perception", result)
+            return result
+
+        async def decision(ctx):
+            decisions = await decide_all(session, simulation_id)
+            result = {"count": len(decisions), "decisions": decisions}
+            await publish("decision", result)
+            return result
+
+        async def interaction(ctx):
+            result = {"status": "no_interaction_handler"}
+            await publish("interaction", result)
+            return result
+
+        async def action(ctx):
+            decisions = ctx.phase_results["decision"].get("decisions", [])
+            actions = await execute_actions(session, [item["action_id"] for item in decisions])
+            result = {"actions": actions, "count": len(actions)}
+            await publish("action", result)
+            return result
+
+        async def cascade(ctx):
+            adjacency = {}
+            for key in state.metadata.get("relationships", {}):
+                source, target = key.split(":", 1)
+                adjacency.setdefault(source, []).append(target)
+            cascaded, truncated = CascadeEngine().run([], adjacency)
+            for effect in cascaded:
+                state.apply_delta(effect.target, effect.field, effect.delta)
+                session.add(EffectModel(
+                    simulation_id=simulation_id, tick=tick, source=effect.source,
+                    target=effect.target, field=effect.field, delta=effect.delta,
+                    confidence=effect.confidence, depth=effect.depth, mechanism=effect.mechanism,
+                ))
+            result = {"count": len(cascaded), "truncated": truncated}
+            await publish("cascade", result)
+            return result
+
+        async def forecast_phase(ctx):
+            for actor_id, actor in state.actors.items():
+                prediction = forecast(
+                    f"{actor_id}:stability", actor.values,
+                    {"economic": changes.get(actor_id, {}).get("economic_capacity", 0),
+                     "social": changes.get(actor_id, {}).get("domestic_pressure", 0) * -0.5},
+                    5, seed + tick,
+                )
+                probabilities = prediction["probabilities"]
+                expected = probabilities["low"] * 0.25 + probabilities["medium"] * 0.50 + probabilities["high"] * 0.75
+                uncertainty = prediction["uncertainty"]
+                session.add(ForecastModel(
+                    simulation_id=simulation_id, tick=tick, target=prediction["target"],
+                    horizon=prediction["horizon"], expected=expected,
+                    lower=max(0.0, expected - uncertainty), upper=min(1.0, expected + uncertainty),
+                    confidence=max(0.0, 1.0 - uncertainty),
+                    drivers={"drivers": prediction["drivers"], "probabilities": probabilities},
+                ))
+            result = {"actors": len(state.actors)}
+            await publish("forecast", result)
+            return result
+
+        async def snapshot(ctx):
+            await sync_world_state_to_db(session, state)
+            await persist_tick(session, simulation_id, state, changes, event_ids, ctx.phase_results)
+            snapshot_data = state.snapshot()
+            previous_hash = parent_hash
+            snapshot_hash = await save_world_version(session, simulation_id, tick, snapshot_data, parent_hash=previous_hash, dataset_version="live")
+            ctx.payload["snapshot_hash"] = snapshot_hash
+            result = {"state_hash": snapshot_hash, "parent_hash": previous_hash}
+            await publish("snapshot", result)
+            return result
+
+        engine = SimulationTickEngine({
+            "ingest": ingest, "state_update": state_update, "perception": perception,
+            "decision": decision, "interaction": interaction, "action": action,
+            "cascade": cascade, "forecast": forecast_phase, "snapshot": snapshot,
+        })
+        completed = await engine.run(context)
+        phase_data = completed.phase_results
+        parent_hash = phase_data["snapshot"]["state_hash"]
+        snapshot_data = state.snapshot()
+        history.append(snapshot_data)
+
         if broadcast:
-            await broadcast({'type': 'tick_completed', 'simulation_id': simulation_id,
-                             'tick': tick, 'state': snapshot, 'phase': phase, 'changes': changes})
+            await broadcast({"type": "tick_completed", "simulation_id": simulation_id, "tick": tick,
+                             "state": snapshot_data, "phase": phase_data, "changes": changes})
+        await event_bus.publish("simulation.tick_completed", {
+            "simulation_id": simulation_id, "tick": tick, "state": snapshot_data, "phases": phase_data,
+        })
 
-    run.status = 'completed'
+    run.status = "completed"
     run.ticks = ticks
     run.events_ingested = len(raw_events or [])
     run.events_new = len(normalized)
     run.finished_at = datetime.now(timezone.utc)
     await session.commit()
-    return {'simulation_id': simulation_id, 'ticks': ticks, 'history': history}
+    return {"simulation_id": simulation_id, "ticks": ticks, "history": history}
