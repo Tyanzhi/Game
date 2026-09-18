@@ -10,12 +10,14 @@ from .realtime_pipeline import scheduler_loop, process_queue
 from .stage5_service import Stage5Service
 from .scenario_engine import ScenarioEngine
 from .ws import ConnectionHub
+from .world_service import WorldRuntime, WorldEvent
 
 _scheduler_task = None
 _scheduler_stop = asyncio.Event()
 app = FastAPI(title='WORLD ENGINE API', version='2.0.0')
 _stage5 = Stage5Service()
 _hub = ConnectionHub()
+_world = WorldRuntime()
 
 @app.on_event('startup')
 async def startup():
@@ -27,6 +29,21 @@ async def startup():
 @app.get('/health')
 async def health():
     return {'status': 'ok', 'engine': 'world-engine-v2'}
+
+@app.get('/api/world/state')
+async def world_state():
+    return _world.snapshot()
+
+@app.post('/api/events')
+async def create_event(payload: dict):
+    event = WorldEvent.from_payload(payload)
+    result = _world.apply_event(event)
+    await _hub.broadcast("live", {"type": "world_event", "event_id": event.event_id, "changes": result["changes"]})
+    return result
+
+@app.get('/api/events')
+async def list_events():
+    return _world.events()
 
 @app.get('/api/actors')
 async def actors(db: AsyncSession = Depends(get_db)):
