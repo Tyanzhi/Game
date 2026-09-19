@@ -11,6 +11,7 @@ from .stage5_service import Stage5Service
 from .scenario_engine import ScenarioEngine
 from .ws import ConnectionHub
 from .world_service import WorldRuntime, WorldEvent
+from .strategic_overview import strategic_overview
 
 _scheduler_task = None
 _scheduler_stop = asyncio.Event()
@@ -87,6 +88,10 @@ async def simulation_socket(websocket: WebSocket, simulation_id: str):
 async def simulation_ticks(simulation_id: str, db: AsyncSession = Depends(get_db)):
     rows = (await db.execute(select(SimulationTickModel).where(SimulationTickModel.simulation_id == simulation_id).order_by(SimulationTickModel.tick))).scalars().all()
     return [{'tick': r.tick, 'state_changes': r.state_changes, 'phase_log': r.phase_log} for r in rows]
+
+@app.get('/api/simulations/{simulation_id}/strategic-overview')
+async def simulation_strategic_overview(simulation_id: str, db: AsyncSession = Depends(get_db)):
+    return await strategic_overview(db, simulation_id)
 
 @app.post('/api/ingestion/sync')
 async def ingestion_sync(query: str = 'geopolitics', max_records: int = 25, db: AsyncSession = Depends(get_db)):
