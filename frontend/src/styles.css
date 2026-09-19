@@ -166,3 +166,95 @@ input,select { width:100%; color:#e6f0ff; background:#07111e; border:1px solid #
   .causal-step small { grid-column:2 / -1; text-align:left; }
   .world-map svg { min-height:320px; }
 }
+
+
+/* Live intelligence + turn mode */
+.ap-badge {
+  min-width: 54px;
+  text-align: center;
+  border: 1px solid rgba(77,143,255,.32);
+  background: rgba(77,143,255,.08);
+  color: #8cb7ff;
+  border-radius: 999px;
+  padding: 7px 10px;
+  font-size: .7rem;
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+.turn-note { margin: 10px 0 0; font-size: .68rem; line-height: 1.45; }
+.live-intelligence { margin-top: 14px; }
+.secondary-action {
+  min-height: 38px;
+  border: 1px solid #29496d;
+  border-radius: 9px;
+  padding: 0 13px;
+  color: #b9d1ef;
+  background: #0a1727;
+  font-size: .69rem;
+  font-weight: 800;
+  letter-spacing: .07em;
+}
+.secondary-action:disabled { opacity: .5; cursor: wait; }
+.live-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-top: 14px;
+}
+.live-kpis div {
+  border: 1px solid #14263f;
+  background: #07111f;
+  border-radius: 10px;
+  padding: 10px;
+}
+.live-kpis span,.live-kpis strong { display:block; }
+.live-kpis span {
+  color:#697f9b;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  font-size:.61rem;
+}
+.live-kpis strong { margin-top:4px; font-size:.94rem; }
+.live-columns {
+  display:grid;
+  grid-template-columns: 1.35fr 1fr 1fr;
+  gap:14px;
+  margin-top:15px;
+}
+.live-columns h3 {
+  color:#dbe8fa;
+  font-size:.78rem;
+  margin-bottom:8px;
+}
+.world-event-list,.outlook-list { display:grid; gap:7px; }
+.world-event-list > div,.outlook-list > div {
+  border:1px solid #13243c;
+  border-radius:9px;
+  background:#07101d;
+  padding:9px 10px;
+}
+.world-event-list span {
+  color:#55dbbc;
+  text-transform:uppercase;
+  font-size:.59rem;
+  letter-spacing:.07em;
+}
+.world-event-list strong,.world-event-list small,.outlook-list strong,.outlook-list span {
+  display:block;
+}
+.world-event-list strong { margin-top:3px; font-size:.72rem; line-height:1.35; }
+.world-event-list small,.outlook-list span { margin-top:4px; color:#7186a1; font-size:.63rem; }
+.outlook-list strong { font-size:.72rem; }
+.live-error {
+  margin:12px 0 0;
+  color:#ff929f;
+  font-size:.68rem;
+  border-top:1px solid #2a1b28;
+  padding-top:9px;
+}
+@media (max-width: 1000px) {
+  .live-columns { grid-template-columns:1fr; }
+}
+@media (max-width: 650px) {
+  .live-kpis { grid-template-columns:1fr 1fr; }
+}
