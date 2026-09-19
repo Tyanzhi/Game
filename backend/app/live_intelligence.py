@@ -5,7 +5,6 @@ import os
 import re
 from dataclasses import replace
 from datetime import datetime, timezone
-from uuid import uuid4
 
 from sqlalchemy import select
 
@@ -169,10 +168,7 @@ async def run_live_intelligence_cycle(
                 await session.commit()
 
             if normalized and (new_count > 0 or force_simulation):
-                simulation_id = (
-                    f"live-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M')}-"
-                    f"{uuid4().hex[:8]}"
-                )
+                simulation_id = os.getenv("LIVE_SIMULATION_ID", "live-world")
                 async with SessionLocal() as session:
                     await run_simulation(
                         session,
@@ -181,6 +177,7 @@ async def run_live_intelligence_cycle(
                         simulation_id=simulation_id,
                         raw_events=raw,
                         broadcast=broadcast,
+                        mode="live",
                     )
                     await session.commit()
 
