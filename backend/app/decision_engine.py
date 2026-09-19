@@ -37,6 +37,35 @@ def _pick_target(actor_id: str, actors: list[ActorModel], relationships: list[Re
     return (alternatives[0], None) if alternatives else (None, None)
 
 
+def _strategic_posture(
+    action: str,
+    theory: dict,
+    own_crisis: float,
+    target_crisis: float,
+    risk_tolerance: float,
+) -> str:
+    if action == "observe":
+        return "information_gathering"
+    if own_crisis >= 0.55 and action in {"defensive_posture", "economic_adjustment"}:
+        return "containment"
+    if action == "diplomatic_outreach" and (
+        theory.get("liberalism", 0.0) + theory.get("constructivism", 0.0)
+    ) / 2 >= 0.48:
+        return "cooperative_mediation"
+    if (
+        target_crisis >= 0.55
+        and own_crisis < 0.40
+        and risk_tolerance >= 0.55
+        and action in {"public_statement", "economic_adjustment", "defensive_posture"}
+    ):
+        return "opportunistic_leverage"
+    if action == "economic_adjustment":
+        return "resilience"
+    if action == "defensive_posture":
+        return "deterrence"
+    return "signaling"
+
+
 async def decide_all(
     session: AsyncSession,
     simulation_id: str,
@@ -90,6 +119,7 @@ async def decide_all(
             else {"trust": 0.5, "hostility": 0.0, "norm_alignment": 0.5}
         )
         crisis = _crisis_intensity(metadata, actor.id)
+        target_crisis = _crisis_intensity(metadata, target_actor_id) if target_actor_id else 0.0
 
         threat = _clamp(
             max(0.0, -relationship) * 0.48
@@ -150,6 +180,13 @@ async def decide_all(
             elif action == "observe":
                 score += (1.0 - float(actor.information_quality)) * 0.10
 
+            # Strategic opportunity under asymmetric crisis exposure.
+            opportunity = max(0.0, target_crisis - crisis)
+            if action in {"public_statement", "economic_adjustment"}:
+                score += opportunity * float(actor.risk_tolerance) * 0.06
+            elif action == "diplomatic_outreach":
+                score += opportunity * float(actor.strategic_patience) * 0.04
+
             options.append({
                 "action": action,
                 "expected_utility": _clamp(score),
@@ -158,6 +195,8 @@ async def decide_all(
                 "target_actor_id": target_actor_id,
                 "theory": theory.as_dict(),
                 "crisis_intensity": crisis,
+                "target_crisis_intensity": target_crisis,
+                "opportunity": max(0.0, target_crisis - crisis),
             })
 
         options.sort(key=lambda item: (-item["expected_utility"], item["action"]))
@@ -184,6 +223,14 @@ async def decide_all(
             + float(actor.information_quality) * 0.22
         )
         target_actor_id = targets[actor.id]
+        target_crisis = _crisis_intensity(metadata, target_actor_id) if target_actor_id else 0.0
+        posture = _strategic_posture(
+            selected["action"],
+            assessments[actor.id],
+            float(selected.get("crisis_intensity", 0.0)),
+            target_crisis,
+            float(actor.risk_tolerance),
+        )
 
         fingerprint = f"{simulation_id}|{tick}|{actor.id}|{selected['action']}|{target_actor_id or '-'}"
         decision_id = "decision-" + sha256(fingerprint.encode()).hexdigest()[:24]
@@ -191,6 +238,7 @@ async def decide_all(
 
         reasoning = list(selected.get("rationale") or [])
         reasoning.extend(sorted(set(interaction_mechanisms.get(actor.id, []))))
+        reasoning.append(f"strategic_posture:{posture}")
         if not reasoning:
             reasoning = ["bounded_rationality_baseline"]
 
@@ -199,6 +247,7 @@ async def decide_all(
             "markets": dict(markets),
             "crisis_intensity": selected.get("crisis_intensity", 0.0),
             "theory_assessment": assessments[actor.id],
+            "strategic_posture": posture,
             "strategic_memory": (
                 get_memory(metadata, actor.id, target_actor_id)
                 if target_actor_id
@@ -227,6 +276,7 @@ async def decide_all(
             "decision_confidence": confidence,
             "theory_assessment": assessments[actor.id],
             "strategic_mechanisms": sorted(set(interaction_mechanisms.get(actor.id, []))),
+            "strategic_posture": posture,
         }
         action_effects = {k: v for k, v in action_effects.items() if v is not None}
 
@@ -252,6 +302,7 @@ async def decide_all(
             "risk": selected["risk"],
             "theory_assessment": assessments[actor.id],
             "strategic_mechanisms": sorted(set(interaction_mechanisms.get(actor.id, []))),
+            "strategic_posture": posture,
         })
 
     await session.flush()
