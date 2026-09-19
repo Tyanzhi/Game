@@ -142,3 +142,40 @@ async def test_player_action_rejects_invalid_target_and_action():
             )
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_targeted_diplomacy_creates_missing_relationship():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with Session() as session:
+        session.add_all([
+            ActorModel(id="A", name="Alpha"),
+            ActorModel(id="B", name="Beta"),
+        ])
+        await session.commit()
+
+        result = await submit_player_action(
+            session,
+            "sim-new-rel",
+            actor_id="A",
+            action_type="diplomatic_outreach",
+            target_actor_id="B",
+        )
+        assert result["status"] == "executed"
+
+        rows = (
+            await session.execute(
+                __import__("sqlalchemy").select(RelationshipModel).where(
+                    RelationshipModel.source_actor_id == "A",
+                    RelationshipModel.target_actor_id == "B",
+                )
+            )
+        ).scalars().all()
+        assert len(rows) == 1
+        assert rows[0].diplomatic > 0
+
+    await engine.dispose()
