@@ -274,3 +274,69 @@ def update_forecast_calibration(
     row["brier_sum"] += score
     row["mean_brier"] = row["brier_sum"] / row["count"]
     return row
+
+
+def build_multilateral_coalitions(
+    actors: dict[str, dict],
+    relationships: dict[str, dict],
+    crisis_graph: dict,
+) -> list[dict]:
+    """Merge compatible bilateral coalition edges into groups of 3+ actors."""
+    bilateral = build_coalitions(actors, relationships, crisis_graph)
+    graph: dict[str, set[str]] = {actor_id: set() for actor_id in actors}
+    edge_scores: dict[tuple[str, str], float] = {}
+
+    for coalition in bilateral:
+        a, b = coalition["members"]
+        graph[a].add(b)
+        graph[b].add(a)
+        edge_scores[tuple(sorted((a, b)))] = float(coalition["score"])
+
+    visited: set[str] = set()
+    groups: list[dict] = []
+    for actor_id in sorted(graph):
+        if actor_id in visited or not graph[actor_id]:
+            continue
+        stack = [actor_id]
+        component: set[str] = set()
+        while stack:
+            current = stack.pop()
+            if current in component:
+                continue
+            component.add(current)
+            stack.extend(graph[current] - component)
+
+        visited |= component
+        if len(component) < 3:
+            continue
+
+        members = sorted(component)
+        scores = []
+        for i, a in enumerate(members):
+            for b in members[i + 1:]:
+                score = edge_scores.get(tuple(sorted((a, b))))
+                if score is not None:
+                    scores.append(score)
+
+        possible_edges = len(members) * (len(members) - 1) / 2
+        density = len(scores) / possible_edges if possible_edges else 0.0
+        cohesion = (sum(scores) / len(scores) if scores else 0.0) * density
+
+        shared_crises = []
+        for crisis_id, node in crisis_graph.get("nodes", {}).items():
+            participants = set(node.get("participants", []))
+            overlap = participants & set(members)
+            if len(overlap) >= 2 and node.get("phase") != "resolved":
+                shared_crises.append(crisis_id)
+
+        groups.append({
+            "members": members,
+            "size": len(members),
+            "cohesion": round(clamp(cohesion), 6),
+            "density": round(clamp(density), 6),
+            "shared_crises": sorted(shared_crises),
+            "basis": "multilateral_network",
+        })
+
+    groups.sort(key=lambda item: (-item["cohesion"], item["members"]))
+    return groups
