@@ -51,7 +51,7 @@ class EventPropagation:
         "domestic_pressure": "domestic_pressure",
         "information": "information_quality",
         "security": "security_capacity",
-        "diplomatic": "diplomatic",
+        "diplomatic": "diplomatic_capacity",
     }
 
     def _perception(self, actor: dict, domain: str, relation: float, event_confidence: float, seed: int) -> float:
@@ -118,9 +118,10 @@ class EventPropagation:
                 if link <= 0.05:
                     continue
                 confidence = min(1.0, effect.confidence * (0.75 + min(link, 1.0) * 0.2))
-                output.append(PropagationEffect(
+                next_effect = PropagationEffect(
                     effect.event_id, effect.target, actor_id, effect.domain, effect.field,
                     propagated * (0.7 + min(link, 1.0) * 0.3), confidence,
                     "network_propagation", effect.perception * 0.8, effect.depth + 1, effect.event_id
-                ))
+                )
+                queue.append((next_effect, involved))
         return output
