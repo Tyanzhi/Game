@@ -6,12 +6,19 @@ from .models import ActorModel, SimulationRunModel, SimulationTickModel
 from .simulation import run_simulation
 from .ingestion_service import sync_sources
 import asyncio
-from .realtime_pipeline import scheduler_loop, process_queue
+from .realtime_pipeline import process_queue
 from .stage5_service import Stage5Service
 from .scenario_engine import ScenarioEngine
 from .ws import ConnectionHub
 from .world_service import WorldRuntime, WorldEvent
 from .strategic_overview import strategic_overview
+from .game_turn import play_turn
+from .live_intelligence import (
+    live_intelligence_loop,
+    live_state,
+    recent_live_events,
+    run_live_intelligence_cycle,
+)
 from .strategic_gameplay import (
     actor_detail,
     causal_chain,
@@ -32,11 +39,20 @@ async def startup():
     global _scheduler_task
     await init_db()
     if not _scheduler_task:
-        _scheduler_task = asyncio.create_task(scheduler_loop(SessionLocal, interval_seconds=900, stop_event=_scheduler_stop))
+        _scheduler_task = asyncio.create_task(
+            live_intelligence_loop(
+                broadcast=lambda payload: _hub.broadcast(payload['simulation_id'], payload),
+                stop_event=_scheduler_stop,
+            )
+        )
 
 @app.get('/health')
 async def health():
-    return {'status': 'ok', 'engine': 'world-engine-v2'}
+    return {
+        'status': 'ok',
+        'engine': 'world-engine-v2',
+        'live_intelligence': live_state.snapshot(),
+    }
 
 @app.get('/api/world/state')
 async def world_state():
@@ -134,6 +150,44 @@ async def simulation_causal_chain(
     db: AsyncSession = Depends(get_db),
 ):
     return await causal_chain(db, simulation_id, limit)
+
+@app.post('/api/simulations/{simulation_id}/turns')
+async def simulation_turn(
+    simulation_id: str,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await play_turn(
+            db,
+            parent_simulation_id=simulation_id,
+            actor_id=str(payload.get('actor_id') or ''),
+            action_type=str(payload.get('action_type') or ''),
+            target_actor_id=(
+                str(payload.get('target_actor_id'))
+                if payload.get('target_actor_id') else None
+            ),
+            seed=int(payload.get('seed', 0)),
+            action_points=int(payload.get('action_points', 2)),
+            broadcast=lambda message: _hub.broadcast(message['simulation_id'], message),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+@app.get('/api/live-intelligence/status')
+async def live_intelligence_status():
+    return live_state.snapshot()
+
+@app.get('/api/live-intelligence/events')
+async def live_intelligence_events(limit: int = 50):
+    return await recent_live_events(max(1, min(200, int(limit))))
+
+@app.post('/api/live-intelligence/run-now')
+async def live_intelligence_run_now():
+    return await run_live_intelligence_cycle(
+        broadcast=lambda payload: _hub.broadcast(payload['simulation_id'], payload),
+        force_simulation=True,
+    )
 
 @app.post('/api/simulations/{simulation_id}/player-actions')
 async def simulation_player_action(
