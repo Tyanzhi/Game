@@ -28,6 +28,7 @@ from .strategic_dynamics import (
     update_belief_from_action,
     update_forecast_calibration,
 )
+from .strategic_planning import update_strategy_learning
 
 
 _ACTION_EFFECT_FIELDS = {
@@ -318,7 +319,33 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
                     state.apply_delta(effect.target, effect.field, effect.delta)
                     changes.setdefault(effect.target, {})[effect.field] = changes.setdefault(effect.target, {}).get(effect.field, 0) + effect.delta
                 session.add(EffectModel(simulation_id=simulation_id, tick=tick, source=effect.source, target=effect.target, field=effect.field, delta=effect.delta, confidence=effect.confidence, depth=effect.depth, mechanism=effect.mechanism))
-            result = {"count": len(cascaded), "initial_count": len(initial_effects), "event_propagation": len(propagated_events), "secondary_crises": len(secondary_events), "crisis_nodes": len(state.metadata.get("crisis_graph", {}).get("nodes", {})), "reactions": ctx.phase_results.get("action", {}).get("reaction_actions", 0), "unexpected_shocks": len(shocks), "truncated": truncated}
+
+            learning_updates = 0
+            for executed in action_results:
+                if executed.get("status") != "executed":
+                    continue
+                actor_id = str(executed.get("actor_id") or "")
+                effects = executed.get("effects") or {}
+                action_type = str(effects.get("action") or "")
+                if not actor_id or not action_type:
+                    continue
+
+                actor_changes = changes.get(actor_id, {})
+                realized = float(effects.get("expected_utility", 0.5))
+                realized += float(actor_changes.get("stability", 0.0)) * 0.35
+                realized += float(actor_changes.get("economic_capacity", 0.0)) * 0.25
+                realized += float(actor_changes.get("security_capacity", 0.0)) * 0.20
+                realized += float(actor_changes.get("diplomatic_capacity", 0.0)) * 0.15
+                realized -= max(0.0, float(actor_changes.get("domestic_pressure", 0.0))) * 0.20
+                update_strategy_learning(
+                    state.metadata,
+                    actor_id,
+                    action_type,
+                    max(0.0, min(1.0, realized)),
+                )
+                learning_updates += 1
+
+            result = {"count": len(cascaded), "initial_count": len(initial_effects), "event_propagation": len(propagated_events), "secondary_crises": len(secondary_events), "crisis_nodes": len(state.metadata.get("crisis_graph", {}).get("nodes", {})), "reactions": ctx.phase_results.get("action", {}).get("reaction_actions", 0), "unexpected_shocks": len(shocks), "strategy_learning_updates": learning_updates, "truncated": truncated}
             await publish("cascade", result)
             return result
         async def forecast_phase(ctx):
