@@ -13,6 +13,7 @@ from .event_engine import RawEvent, normalize
 from .event_store import persist_events
 from .models import ActorModel, EventModel, SimulationRunModel
 from .simulation import run_simulation
+from .runtime_bus import runtime_bus
 from .sources.gdelt import fetch_news
 from .sources.worldbank import fetch_indicators
 
@@ -135,6 +136,23 @@ class LiveIntelligenceState:
 
 live_state = LiveIntelligenceState()
 _live_cycle_lock = asyncio.Lock()
+_LIVE_STATE_KEY = "world-engine:live-intelligence-state"
+
+
+async def persist_live_state() -> None:
+    if runtime_bus.enabled:
+        await runtime_bus.set_json(_LIVE_STATE_KEY, live_state.snapshot())
+
+
+async def get_live_state_snapshot() -> dict:
+    if runtime_bus.enabled:
+        try:
+            shared = await runtime_bus.get_json(_LIVE_STATE_KEY)
+            if shared is not None:
+                return shared
+        except Exception:
+            pass
+    return live_state.snapshot()
 
 
 async def run_live_intelligence_cycle(
@@ -153,6 +171,7 @@ async def run_live_intelligence_cycle(
         live_state.running = True
         live_state.last_started_at = datetime.now(timezone.utc).isoformat()
         live_state.last_error = None
+        await persist_live_state()
         simulation_id = None
         try:
             include_world_bank = live_state.cycles_completed % 24 == 0
@@ -202,6 +221,10 @@ async def run_live_intelligence_cycle(
         finally:
             live_state.running = False
             live_state.last_finished_at = datetime.now(timezone.utc).isoformat()
+            try:
+                await persist_live_state()
+            except Exception:
+                pass
 
 
 async def live_intelligence_loop(
