@@ -26,3 +26,58 @@ The LLM is not the authoritative world-state engine. Structured state, determini
 The first vertical slice is:
 
 `data → event → world state → AI actor → decision → simulation tick → forecast → live UI`
+
+
+## Live World Intelligence
+
+When the FastAPI service starts, WORLD ENGINE launches a live-intelligence loop.
+
+Default cadence:
+
+```
+LIVE_INTELLIGENCE_INTERVAL_SECONDS=300
+```
+
+The interval can be changed with the environment variable above. Each cycle:
+
+1. pulls recent world-news data from GDELT;
+2. periodically refreshes macroeconomic indicators from World Bank;
+3. validates, deduplicates and normalizes external data;
+4. links events to known simulation actors;
+5. classifies events into crisis/event domains understood by the simulation;
+6. persists new evidence;
+7. runs a live simulation tick when new evidence is available;
+8. updates actor decisions, crisis propagation, markets and probabilistic forecasts.
+
+Live endpoints:
+
+- `GET /api/live-intelligence/status`
+- `GET /api/live-intelligence/events`
+- `GET /api/live-intelligence/outlook`
+- `POST /api/live-intelligence/run-now`
+
+The outlook contains model-generated possible future crisis branches, expected actor actions and probabilistic forecasts. These are simulation outputs with uncertainty, not assertions that future events will occur.
+
+## Turn mode
+
+The game turn endpoint is:
+
+```
+POST /api/simulations/{simulation_id}/turns
+```
+
+A turn resolves in this order:
+
+```
+player action
+→ resource/AP validation
+→ action execution
+→ AI decisions for all non-player actors
+→ reactions and third parties
+→ crisis/event propagation
+→ delayed effects
+→ forecasts
+→ new simulation state
+```
+
+The actor controlled by the player is excluded from AI decision generation during that turn.
