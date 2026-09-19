@@ -12,7 +12,7 @@ from sqlalchemy import select
 from .db import SessionLocal
 from .event_engine import RawEvent, normalize
 from .event_store import persist_events
-from .models import ActorModel, EventModel, SimulationRunModel
+from .models import ActorModel, EventModel
 from .simulation import run_simulation
 from .sources.gdelt import fetch_news
 from .sources.worldbank import fetch_indicators
@@ -155,10 +155,10 @@ async def run_live_intelligence_cycle(
         simulation_id = None
         try:
             raw, source_errors = await collect_live_events(
-            queries=queries,
-            max_records_per_query=max_records_per_query,
-            include_world_bank=False,
-        )
+                queries=queries,
+                max_records_per_query=max_records_per_query,
+                include_world_bank=False,
+            )
             normalized = normalize(raw)
 
             async with SessionLocal() as session:
@@ -166,7 +166,10 @@ async def run_live_intelligence_cycle(
                 await session.commit()
 
             if normalized and (new_count > 0 or force_simulation):
-                simulation_id = f"live-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M')}-{uuid4().hex[:8]}"
+                simulation_id = (
+                    f"live-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M')}-"
+                    f"{uuid4().hex[:8]}"
+                )
                 async with SessionLocal() as session:
                     await run_simulation(
                         session,
