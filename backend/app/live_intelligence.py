@@ -133,6 +133,7 @@ class LiveIntelligenceState:
 
 
 live_state = LiveIntelligenceState()
+_live_cycle_lock = asyncio.Lock()
 
 
 async def run_live_intelligence_cycle(
@@ -142,48 +143,54 @@ async def run_live_intelligence_cycle(
     max_records_per_query: int = 20,
     force_simulation: bool = False,
 ) -> dict:
-    live_state.running = True
-    live_state.last_started_at = datetime.now(timezone.utc).isoformat()
-    live_state.last_error = None
-    simulation_id = None
-    try:
-        raw, source_errors = await collect_live_events(
+    if _live_cycle_lock.locked():
+        snapshot = live_state.snapshot()
+        snapshot["skipped_concurrent"] = True
+        return snapshot
+
+    async with _live_cycle_lock:
+        live_state.running = True
+        live_state.last_started_at = datetime.now(timezone.utc).isoformat()
+        live_state.last_error = None
+        simulation_id = None
+        try:
+            raw, source_errors = await collect_live_events(
             queries=queries,
             max_records_per_query=max_records_per_query,
             include_world_bank=False,
         )
-        normalized = normalize(raw)
+            normalized = normalize(raw)
 
-        async with SessionLocal() as session:
-            new_count, duplicate_count = await persist_events(session, normalized)
-            await session.commit()
-
-        if normalized and (new_count > 0 or force_simulation):
-            simulation_id = f"live-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M')}-{uuid4().hex[:8]}"
             async with SessionLocal() as session:
-                await run_simulation(
-                    session,
-                    ticks=1,
-                    seed=int(datetime.now(timezone.utc).timestamp()) % 1_000_000,
-                    simulation_id=simulation_id,
-                    raw_events=raw,
-                    broadcast=broadcast,
-                )
+                new_count, duplicate_count = await persist_events(session, normalized)
                 await session.commit()
 
-        live_state.last_simulation_id = simulation_id
-        live_state.last_raw_events = len(raw)
-        live_state.last_normalized_events = len(normalized)
-        live_state.last_new_events = new_count
-        live_state.last_duplicates = duplicate_count
-        live_state.source_errors = source_errors
-        return live_state.snapshot()
-    except Exception as exc:
-        live_state.last_error = str(exc)[:1000]
-        raise
-    finally:
-        live_state.running = False
-        live_state.last_finished_at = datetime.now(timezone.utc).isoformat()
+            if normalized and (new_count > 0 or force_simulation):
+                simulation_id = f"live-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M')}-{uuid4().hex[:8]}"
+                async with SessionLocal() as session:
+                    await run_simulation(
+                        session,
+                        ticks=1,
+                        seed=int(datetime.now(timezone.utc).timestamp()) % 1_000_000,
+                        simulation_id=simulation_id,
+                        raw_events=raw,
+                        broadcast=broadcast,
+                    )
+                    await session.commit()
+
+            live_state.last_simulation_id = simulation_id
+            live_state.last_raw_events = len(raw)
+            live_state.last_normalized_events = len(normalized)
+            live_state.last_new_events = new_count
+            live_state.last_duplicates = duplicate_count
+            live_state.source_errors = source_errors
+            return live_state.snapshot()
+        except Exception as exc:
+            live_state.last_error = str(exc)[:1000]
+            raise
+        finally:
+            live_state.running = False
+            live_state.last_finished_at = datetime.now(timezone.utc).isoformat()
 
 
 async def live_intelligence_loop(
