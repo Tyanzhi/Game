@@ -126,7 +126,7 @@ async def plan_reactions(
             ReactionPlan(
                 actor_id=target,
                 action_type=selected,
-                target_actor_id=source if selected == "diplomatic_outreach" else None,
+                target_actor_id=source,
                 score=response_intensity,
                 reason=reason,
                 source_action_id=str(action.get("action_id") or ""),
@@ -148,7 +148,7 @@ async def plan_reactions(
                 ReactionPlan(
                     actor_id=third,
                     action_type=third_action,
-                    target_actor_id=target if third_action == "diplomatic_outreach" else None,
+                    target_actor_id=target,
                     score=response_intensity * 0.55,
                     reason="third_party_intervention",
                     source_action_id=str(action.get("action_id") or ""),
