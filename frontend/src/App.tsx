@@ -351,7 +351,7 @@ export default function App() {
           <p className="eyebrow">GLOBAL MARKETS</p>
           <div className="market-grid">
             {Object.entries(overview?.markets ?? {}).map(([key, value]) => (
-              <div key={key}><span>{key.replaceAll("_", " ")}</span><strong>{signed(value)}</strong></div>
+              <div key={key}><span>{key.replace(/_/g, " ")}</span><strong>{signed(value)}</strong></div>
             ))}
           </div>
           <p className="eyebrow section-gap">COALITIONS</p>
