@@ -114,18 +114,43 @@ async def health_live():
 async def health_ready(db: AsyncSession = Depends(get_db)):
     try:
         await db.execute(text('SELECT 1'))
-        redis_ready = await runtime_bus.ping()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f'dependency unavailable: {exc}') from exc
-
-    if not redis_ready:
-        raise HTTPException(status_code=503, detail='redis unavailable')
+        raise HTTPException(status_code=503, detail=f'database unavailable: {exc}') from exc
 
     return {
         'status': 'ready',
         'database': 'ok',
-        'redis': 'ok' if runtime_bus.enabled else 'disabled',
     }
+
+
+@app.get('/health/dependencies')
+async def health_dependencies(db: AsyncSession = Depends(get_db)):
+    result = {
+        'status': 'ok',
+        'database': 'unknown',
+        'redis': 'disabled' if not runtime_bus.enabled else 'unknown',
+        'redis_error': None,
+    }
+
+    try:
+        await db.execute(text('SELECT 1'))
+        result['database'] = 'ok'
+    except Exception as exc:
+        result['database'] = 'error'
+        result['status'] = 'degraded'
+        result['database_error'] = str(exc)
+
+    if runtime_bus.enabled:
+        try:
+            result['redis'] = 'ok' if await runtime_bus.ping() else 'error'
+            if result['redis'] != 'ok':
+                result['status'] = 'degraded'
+        except Exception as exc:
+            result['redis'] = 'error'
+            result['redis_error'] = str(exc)
+            result['status'] = 'degraded'
+
+    return result
 
 @app.get('/api/world/state')
 async def world_state():
