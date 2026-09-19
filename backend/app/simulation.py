@@ -21,6 +21,7 @@ from .simulation_tick import SimulationTickEngine, TickContext
 from .strategic_memory import decay_memory, update_memory_from_action
 from .strategic_dynamics import (
     build_coalitions,
+    build_multilateral_coalitions,
     nash_bargain,
     pop_due_effects,
     schedule_delayed_effects,
@@ -127,6 +128,11 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
                 state.metadata.get("relationships", {}),
                 state.metadata.get("crisis_graph", {}),
             )
+            multilateral_coalitions = build_multilateral_coalitions(
+                actor_values,
+                state.metadata.get("relationships", {}),
+                state.metadata.get("crisis_graph", {}),
+            )
 
             bargains = []
             diplomatic = [
@@ -158,10 +164,13 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
                     state.apply_relationship_delta(actor_b, actor_a, "diplomatic", 0.01)
 
             state.metadata["coalitions"] = coalitions
+            state.metadata["multilateral_coalitions"] = multilateral_coalitions
             state.metadata["bargaining"] = bargains
             result = {
                 "coalitions": coalitions,
                 "coalition_count": len(coalitions),
+                "multilateral_coalitions": multilateral_coalitions,
+                "multilateral_coalition_count": len(multilateral_coalitions),
                 "bargains": bargains,
                 "accepted_bargains": sum(1 for item in bargains if item["accepted"]),
             }
