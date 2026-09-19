@@ -3,8 +3,10 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .geo_catalog import actor_geography
 from .models import (
     ActorModel,
+    CountryModel,
     DecisionModel,
     ForecastModel,
     RelationshipModel,
@@ -35,6 +37,10 @@ async def strategic_overview(session: AsyncSession, simulation_id: str) -> dict:
     actors = (
         await session.execute(select(ActorModel).order_by(ActorModel.id))
     ).scalars().all()
+    countries = (
+        await session.execute(select(CountryModel))
+    ).scalars().all()
+    country_by_actor = {row.actor_id: row for row in countries}
     relationships = (
         await session.execute(select(RelationshipModel))
     ).scalars().all()
@@ -63,19 +69,25 @@ async def strategic_overview(session: AsyncSession, simulation_id: str) -> dict:
 
     actor_payload = []
     for actor in actors:
-        snap = snapshot_actors.get(actor.id, {})
+        country = country_by_actor.get(actor.id)
+        geography = actor_geography(
+            actor.id,
+            actor.name,
+            country.region if country else "",
+        )
         actor_payload.append({
             "id": actor.id,
             "name": actor.name,
             "actor_type": actor.actor_type,
-            "stability": float(snap.get("stability", actor.stability)),
-            "economic_capacity": float(snap.get("economic_capacity", actor.economic_capacity)),
-            "diplomatic_capacity": float(snap.get("diplomatic_capacity", actor.diplomatic_capacity)),
-            "security_capacity": float(snap.get("security_capacity", actor.security_capacity)),
-            "domestic_pressure": float(snap.get("domestic_pressure", actor.domestic_pressure)),
-            "information_quality": float(snap.get("information_quality", actor.information_quality)),
-            "energy_security": float(snap.get("energy_security", actor.energy_security)),
-            "trade_resilience": float(snap.get("trade_resilience", actor.trade_resilience)),
+            "stability": float(actor.stability),
+            "economic_capacity": float(actor.economic_capacity),
+            "diplomatic_capacity": float(actor.diplomatic_capacity),
+            "security_capacity": float(actor.security_capacity),
+            "domestic_pressure": float(actor.domestic_pressure),
+            "information_quality": float(actor.information_quality),
+            "energy_security": float(actor.energy_security),
+            "trade_resilience": float(actor.trade_resilience),
+            "geography": geography,
         })
 
     relationship_payload = [{
