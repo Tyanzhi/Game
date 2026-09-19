@@ -16,6 +16,7 @@ from .world_service import WorldRuntime, WorldEvent
 from .strategic_overview import strategic_overview
 from .game_turn import play_turn
 from .live_intelligence import (
+    get_live_state_snapshot,
     live_intelligence_loop,
     live_state,
     recent_live_events,
@@ -101,7 +102,7 @@ async def health():
         'engine': 'world-engine-v2.1',
         'role': os.getenv('APP_ROLE', 'api'),
         'runtime_bus': 'redis' if runtime_bus.enabled else 'local',
-        'live_intelligence': live_state.snapshot(),
+        'live_intelligence': await get_live_state_snapshot(),
     }
 
 
@@ -289,7 +290,7 @@ async def simulation_turn(
 
 @app.get('/api/live-intelligence/status')
 async def live_intelligence_status():
-    return live_state.snapshot()
+    return await get_live_state_snapshot()
 
 @app.get('/api/live-intelligence/events')
 async def live_intelligence_events(limit: int = 50):
@@ -297,11 +298,14 @@ async def live_intelligence_events(limit: int = 50):
 
 @app.get('/api/live-intelligence/outlook')
 async def live_intelligence_outlook(db: AsyncSession = Depends(get_db)):
-    return await build_live_outlook(db, live_state.last_simulation_id)
+    state = await get_live_state_snapshot()
+    return await build_live_outlook(db, state.get('last_simulation_id'))
 
 @app.get('/api/live-intelligence/prediction-center')
 async def live_prediction_center(db: AsyncSession = Depends(get_db)):
-    if not live_state.last_simulation_id:
+    state = await get_live_state_snapshot()
+    simulation_id = state.get('last_simulation_id')
+    if not simulation_id:
         return {
             'simulation_id': None,
             'status': 'no_live_simulation',
@@ -311,7 +315,7 @@ async def live_prediction_center(db: AsyncSession = Depends(get_db)):
             'causal_graph': {'nodes': [], 'edges': []},
             'calibration': {'scored_targets': 0, 'mean_brier': None, 'quality': 'unscored'},
         }
-    return await build_prediction_center(db, live_state.last_simulation_id)
+    return await build_prediction_center(db, simulation_id)
 
 @app.get('/api/simulations/{simulation_id}/prediction-center')
 async def simulation_prediction_center(
