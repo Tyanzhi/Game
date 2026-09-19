@@ -35,6 +35,16 @@ class CrisisGraph:
 
     PHASES = ("emerging", "escalating", "peak", "contained", "decaying", "resolved")
 
+    INTERACTIONS = {
+        ("economic_crisis", "energy_disruption"): 0.06,
+        ("economic_crisis", "internal_crisis"): 0.05,
+        ("internal_crisis", "security_incident"): 0.07,
+        ("diplomatic_crisis", "security_incident"): 0.06,
+        ("economic_crisis", "natural_disaster"): 0.04,
+        ("intelligence_failure", "security_incident"): 0.05,
+        ("diplomatic_crisis", "economic_crisis"): 0.025,
+    }
+
     BRANCHES = {
         "economic_crisis": ("internal_crisis", "security_incident"),
         "energy_disruption": ("economic_crisis", "internal_crisis"),
@@ -86,6 +96,50 @@ class CrisisGraph:
                     uncertainty=1.0 - event.confidence,
                 ).__dict__
 
+        interaction_delta: dict[str, float] = {cid: 0.0 for cid in nodes}
+        active_items = [
+            (cid, raw)
+            for cid, raw in nodes.items()
+            if raw.get("phase") != "resolved"
+        ]
+        for index, (cid_a, raw_a) in enumerate(active_items):
+            participants_a = set(raw_a.get("participants", ()))
+            for cid_b, raw_b in active_items[index + 1:]:
+                interaction_key = tuple(sorted((raw_a.get("event_type"), raw_b.get("event_type"))))
+                base_strength = self.INTERACTIONS.get(interaction_key, 0.0)
+                if base_strength <= 0:
+                    continue
+
+                participants_b = set(raw_b.get("participants", ()))
+                overlap = participants_a & participants_b
+                connectivity = 1.0 if overlap else 0.0
+                if not overlap:
+                    for actor_a in participants_a:
+                        for actor_b in participants_b:
+                            rel = relationships.get(f"{actor_a}:{actor_b}", {})
+                            reverse = relationships.get(f"{actor_b}:{actor_a}", {})
+                            link = max(
+                                abs(float(rel.get("diplomatic", 0.0))) + abs(float(rel.get("economic", 0.0))),
+                                abs(float(reverse.get("diplomatic", 0.0))) + abs(float(reverse.get("economic", 0.0))),
+                            )
+                            connectivity = max(connectivity, min(1.0, link / 1.5))
+
+                if connectivity <= 0.1:
+                    continue
+
+                strength = base_strength * connectivity * (
+                    0.5 + 0.5 * min(float(raw_a.get("intensity", 0.0)), float(raw_b.get("intensity", 0.0)))
+                )
+                interaction_delta[cid_a] += strength
+                interaction_delta[cid_b] += strength
+                graph["edges"].append({
+                    "from": cid_a,
+                    "to": cid_b,
+                    "tick": tick,
+                    "mechanism": "crisis_interaction",
+                    "strength": round(strength, 6),
+                })
+
         for cid, raw in list(nodes.items()):
             age = max(0, tick - int(raw["tick_started"]))
             rng = self._rng(seed, cid, tick)
@@ -100,7 +154,7 @@ class CrisisGraph:
                     if key.startswith(actor_id + ":") or key.endswith(":" + actor_id):
                         network_pressure += abs(float(rel.get("diplomatic", 0.0))) * 0.002
 
-            drift = rng.uniform(-0.09, 0.10) + network_pressure
+            drift = rng.uniform(-0.09, 0.10) + network_pressure + interaction_delta.get(cid, 0.0)
             if phase == "decaying":
                 drift -= 0.06
             intensity = max(0.0, min(1.0, intensity + drift))
@@ -175,6 +229,7 @@ class CrisisGraph:
                 "phase": phase,
                 "intensity": raw["intensity"],
                 "participants": raw["participants"],
+                "interaction_pressure": round(interaction_delta.get(cid, 0.0), 6),
             })
 
         return generated
