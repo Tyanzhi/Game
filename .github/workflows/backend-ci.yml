@@ -22,7 +22,13 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install pytest pytest-asyncio fastapi sqlalchemy pydantic pydantic-settings asyncpg aiosqlite httpx
+      - name: Compile backend
+        run: python -m compileall app
       - name: Run tests
         env:
-          PYTHONPATH: backend
+          PYTHONPATH: .:..
         run: pytest -q
+      - name: Smoke import API
+        env:
+          PYTHONPATH: .:..
+        run: python -c "from app.main import app; print(app.title)"
