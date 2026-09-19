@@ -20,6 +20,7 @@ from .live_intelligence import (
     run_live_intelligence_cycle,
 )
 from .live_outlook import build_live_outlook
+from .prediction_center import build_prediction_center
 from .strategic_gameplay import (
     actor_detail,
     causal_chain,
@@ -186,6 +187,30 @@ async def live_intelligence_events(limit: int = 50):
 @app.get('/api/live-intelligence/outlook')
 async def live_intelligence_outlook(db: AsyncSession = Depends(get_db)):
     return await build_live_outlook(db, live_state.last_simulation_id)
+
+@app.get('/api/live-intelligence/prediction-center')
+async def live_prediction_center(db: AsyncSession = Depends(get_db)):
+    if not live_state.last_simulation_id:
+        return {
+            'simulation_id': None,
+            'status': 'no_live_simulation',
+            'horizons': [1, 7, 30],
+            'actors': [],
+            'scenario_matrix': [],
+            'causal_graph': {'nodes': [], 'edges': []},
+            'calibration': {'scored_targets': 0, 'mean_brier': None, 'quality': 'unscored'},
+        }
+    return await build_prediction_center(db, live_state.last_simulation_id)
+
+@app.get('/api/simulations/{simulation_id}/prediction-center')
+async def simulation_prediction_center(
+    simulation_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await build_prediction_center(db, simulation_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 @app.post('/api/live-intelligence/run-now')
 async def live_intelligence_run_now():
