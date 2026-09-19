@@ -11,7 +11,7 @@ from sqlalchemy import select
 from .db import SessionLocal
 from .event_engine import RawEvent, normalize
 from .event_store import persist_events
-from .models import ActorModel, EventModel
+from .models import ActorModel, EventModel, SimulationRunModel
 from .simulation import run_simulation
 from .sources.gdelt import fetch_news
 from .sources.worldbank import fetch_indicators
