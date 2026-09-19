@@ -19,6 +19,7 @@ from .live_intelligence import (
     recent_live_events,
     run_live_intelligence_cycle,
 )
+from .live_outlook import build_live_outlook
 from .strategic_gameplay import (
     actor_detail,
     causal_chain,
@@ -181,6 +182,10 @@ async def live_intelligence_status():
 @app.get('/api/live-intelligence/events')
 async def live_intelligence_events(limit: int = 50):
     return await recent_live_events(max(1, min(200, int(limit))))
+
+@app.get('/api/live-intelligence/outlook')
+async def live_intelligence_outlook(db: AsyncSession = Depends(get_db)):
+    return await build_live_outlook(db, live_state.last_simulation_id)
 
 @app.post('/api/live-intelligence/run-now')
 async def live_intelligence_run_now():
