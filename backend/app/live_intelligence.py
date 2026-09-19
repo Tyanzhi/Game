@@ -181,7 +181,14 @@ async def run_live_intelligence_cycle(
                     )
                     await session.commit()
 
-            live_state.last_simulation_id = simulation_id
+            if simulation_id is not None:
+                live_state.last_simulation_id = simulation_id
+            elif live_state.last_simulation_id is None:
+                existing_live_id = os.getenv("LIVE_SIMULATION_ID", "live-world")
+                async with SessionLocal() as session:
+                    existing_run = await session.get(SimulationRunModel, existing_live_id)
+                if existing_run is not None:
+                    live_state.last_simulation_id = existing_live_id
             live_state.last_raw_events = len(raw)
             live_state.last_normalized_events = len(normalized)
             live_state.last_new_events = new_count
