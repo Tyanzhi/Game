@@ -28,6 +28,27 @@ class RuntimeBus:
             return
         await self._redis.publish(self.channel, json.dumps(payload, separators=(",", ":")))
 
+    async def set_json(self, key: str, payload: dict, ttl_seconds: int | None = None) -> None:
+        if self._redis is None:
+            return
+        value = json.dumps(payload, separators=(",", ":"))
+        if ttl_seconds:
+            await self._redis.set(key, value, ex=ttl_seconds)
+        else:
+            await self._redis.set(key, value)
+
+    async def get_json(self, key: str) -> dict | None:
+        if self._redis is None:
+            return None
+        value = await self._redis.get(key)
+        if not value:
+            return None
+        try:
+            payload = json.loads(value)
+        except (TypeError, json.JSONDecodeError):
+            return None
+        return payload if isinstance(payload, dict) else None
+
     async def subscribe(
         self,
         handler: Callable[[dict], Awaitable[None]],
