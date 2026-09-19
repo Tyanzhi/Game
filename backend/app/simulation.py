@@ -30,6 +30,7 @@ from .strategic_dynamics import (
     update_forecast_calibration,
 )
 from .strategic_planning import update_strategy_learning
+from .strategic_foresight import assess_multilateral_reliability, brinkmanship_state
 
 
 _ACTION_EFFECT_FIELDS = {
@@ -163,16 +164,60 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
                     state.apply_relationship_delta(actor_a, actor_b, "diplomatic", 0.01)
                     state.apply_relationship_delta(actor_b, actor_a, "diplomatic", 0.01)
 
+            reliable_multilateral = [
+                assess_multilateral_reliability(
+                    coalition,
+                    state.metadata.get("relationships", {}),
+                    state.metadata.get("strategic_memory", {}),
+                    state.metadata.get("crisis_graph", {}),
+                )
+                for coalition in multilateral_coalitions
+            ]
+
+            brinkmanship = []
+            seen_brinkmanship_pairs = set()
+            for item in decisions:
+                actor_a = str(item.get("actor_id") or "")
+                actor_b = str(item.get("target_actor_id") or "")
+                if not actor_a or not actor_b or actor_a == actor_b:
+                    continue
+                pair = tuple(sorted((actor_a, actor_b)))
+                if pair in seen_brinkmanship_pairs:
+                    continue
+                seen_brinkmanship_pairs.add(pair)
+                state_a = state.actors.get(actor_a)
+                state_b = state.actors.get(actor_b)
+                if state_a is None or state_b is None:
+                    continue
+                belief_a = state.metadata.get("beliefs", {}).get(f"{actor_a}:{actor_b}", {})
+                belief_b = state.metadata.get("beliefs", {}).get(f"{actor_b}:{actor_a}", {})
+                assessment = brinkmanship_state(
+                    state_a.values,
+                    state_b.values,
+                    belief_a,
+                    belief_b,
+                )
+                brinkmanship.append({
+                    "actors": [actor_a, actor_b],
+                    **assessment,
+                })
+
             state.metadata["coalitions"] = coalitions
-            state.metadata["multilateral_coalitions"] = multilateral_coalitions
+            state.metadata["multilateral_coalitions"] = reliable_multilateral
             state.metadata["bargaining"] = bargains
+            state.metadata["brinkmanship"] = brinkmanship
             result = {
                 "coalitions": coalitions,
                 "coalition_count": len(coalitions),
-                "multilateral_coalitions": multilateral_coalitions,
-                "multilateral_coalition_count": len(multilateral_coalitions),
+                "multilateral_coalitions": reliable_multilateral,
+                "multilateral_coalition_count": len(reliable_multilateral),
                 "bargains": bargains,
                 "accepted_bargains": sum(1 for item in bargains if item["accepted"]),
+                "brinkmanship": brinkmanship,
+                "high_brinkmanship_pairs": sum(
+                    1 for item in brinkmanship
+                    if item["equilibrium_hint"] == "high_brinkmanship"
+                ),
             }
             await publish("interaction", result)
             return result
