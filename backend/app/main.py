@@ -1,11 +1,13 @@
 from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, text
 from .db import init_db, get_db, SessionLocal
 from .models import ActorModel, SimulationRunModel, SimulationTickModel
 from .simulation import run_simulation
 from .ingestion_service import sync_sources
 import asyncio
+import os
 from .realtime_pipeline import process_queue
 from .stage5_service import Stage5Service
 from .scenario_engine import ScenarioEngine
@@ -21,6 +23,7 @@ from .live_intelligence import (
 )
 from .live_outlook import build_live_outlook
 from .prediction_center import build_prediction_center
+from .runtime_bus import runtime_bus
 from .strategic_gameplay import (
     actor_detail,
     causal_chain,
@@ -31,29 +34,97 @@ from .strategic_gameplay import (
 
 _scheduler_task = None
 _scheduler_stop = asyncio.Event()
-app = FastAPI(title='WORLD ENGINE API', version='2.0.0')
+_bus_task = None
+_bus_stop = asyncio.Event()
+
+app = FastAPI(title='WORLD ENGINE API', version='2.1.0')
+
+_allowed_origins = [
+    item.strip()
+    for item in os.getenv(
+        'CORS_ALLOWED_ORIGINS',
+        'http://localhost:5173,https://geopolitica20261.netlify.app',
+    ).split(',')
+    if item.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins,
+    allow_credentials=False,
+    allow_methods=['*'],
+    allow_headers=['*'],
+)
 _stage5 = Stage5Service()
 _hub = ConnectionHub()
 _world = WorldRuntime()
 
+async def _deliver_runtime_payload(payload: dict):
+    simulation_id = str(payload.get('simulation_id') or 'live')
+    await _hub.broadcast(simulation_id, payload)
+
+
+async def _broadcast_payload(payload: dict):
+    if runtime_bus.enabled:
+        await runtime_bus.publish(payload)
+    else:
+        await _deliver_runtime_payload(payload)
+
+
 @app.on_event('startup')
 async def startup():
-    global _scheduler_task
-    await init_db()
-    if not _scheduler_task:
+    global _scheduler_task, _bus_task
+
+    if os.getenv('AUTO_CREATE_SCHEMA', '1').lower() in {'1', 'true', 'yes'}:
+        await init_db()
+
+    if runtime_bus.enabled and _bus_task is None:
+        _bus_task = asyncio.create_task(
+            runtime_bus.subscribe(_deliver_runtime_payload, _bus_stop)
+        )
+
+    if (
+        os.getenv('EMBEDDED_LIVE_SCHEDULER', '0').lower() in {'1', 'true', 'yes'}
+        and _scheduler_task is None
+    ):
         _scheduler_task = asyncio.create_task(
             live_intelligence_loop(
-                broadcast=lambda payload: _hub.broadcast(payload['simulation_id'], payload),
+                broadcast=_broadcast_payload,
                 stop_event=_scheduler_stop,
             )
         )
+
 
 @app.get('/health')
 async def health():
     return {
         'status': 'ok',
-        'engine': 'world-engine-v2',
+        'engine': 'world-engine-v2.1',
+        'role': os.getenv('APP_ROLE', 'api'),
+        'runtime_bus': 'redis' if runtime_bus.enabled else 'local',
         'live_intelligence': live_state.snapshot(),
+    }
+
+
+@app.get('/health/live')
+async def health_live():
+    return {'status': 'ok', 'role': os.getenv('APP_ROLE', 'api')}
+
+
+@app.get('/health/ready')
+async def health_ready(db: AsyncSession = Depends(get_db)):
+    try:
+        await db.execute(text('SELECT 1'))
+        redis_ready = await runtime_bus.ping()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f'dependency unavailable: {exc}') from exc
+
+    if not redis_ready:
+        raise HTTPException(status_code=503, detail='redis unavailable')
+
+    return {
+        'status': 'ready',
+        'database': 'ok',
+        'redis': 'ok' if runtime_bus.enabled else 'disabled',
     }
 
 @app.get('/api/world/state')
@@ -64,7 +135,12 @@ async def world_state():
 async def create_event(payload: dict):
     event = WorldEvent.from_payload(payload)
     result = _world.apply_event(event)
-    await _hub.broadcast("live", {"type": "world_event", "event_id": event.event_id, "changes": result["changes"]})
+    await _broadcast_payload({
+        "type": "world_event",
+        "simulation_id": "live",
+        "event_id": event.event_id,
+        "changes": result["changes"],
+    })
     return result
 
 @app.get('/api/events')
@@ -78,7 +154,13 @@ async def actors(db: AsyncSession = Depends(get_db)):
 
 @app.post('/api/simulations')
 async def simulations(ticks: int = 5, seed: int = 0, simulation_id: str | None = None, db: AsyncSession = Depends(get_db)):
-    return await run_simulation(db, ticks=ticks, seed=seed, simulation_id=simulation_id, broadcast=lambda payload: _hub.broadcast(payload['simulation_id'], payload))
+    return await run_simulation(
+        db,
+        ticks=ticks,
+        seed=seed,
+        simulation_id=simulation_id,
+        broadcast=_broadcast_payload,
+    )
 
 @app.get('/api/simulations')
 async def simulation_list(db: AsyncSession = Depends(get_db)):
@@ -105,7 +187,11 @@ async def simulation_socket(websocket: WebSocket, simulation_id: str):
         await websocket.send_json({'type': 'connected', 'simulation_id': simulation_id})
         while True:
             message = await websocket.receive_json()
-            await _hub.broadcast(simulation_id, {'type': 'client_message', 'simulation_id': simulation_id, 'payload': message})
+            await _broadcast_payload({
+                'type': 'client_message',
+                'simulation_id': simulation_id,
+                'payload': message,
+            })
     except WebSocketDisconnect:
         _hub.disconnect(simulation_id, websocket)
 
@@ -171,7 +257,7 @@ async def simulation_turn(
             ),
             seed=int(payload.get('seed', 0)),
             action_points=int(payload.get('action_points', 2)),
-            broadcast=lambda message: _hub.broadcast(message['simulation_id'], message),
+            broadcast=_broadcast_payload,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -215,7 +301,7 @@ async def simulation_prediction_center(
 @app.post('/api/live-intelligence/run-now')
 async def live_intelligence_run_now():
     return await run_live_intelligence_cycle(
-        broadcast=lambda payload: _hub.broadcast(payload['simulation_id'], payload),
+        broadcast=_broadcast_payload,
         force_simulation=True,
     )
 
@@ -257,5 +343,11 @@ async def world_state_versions(simulation_id: str, db: AsyncSession = Depends(ge
 @app.on_event('shutdown')
 async def shutdown():
     _scheduler_stop.set()
+    _bus_stop.set()
+
     if _scheduler_task:
         await _scheduler_task
+    if _bus_task:
+        await _bus_task
+
+    await runtime_bus.close()
