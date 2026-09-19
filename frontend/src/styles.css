@@ -111,3 +111,58 @@ input,select { width:100%; color:#e6f0ff; background:#07111e; border:1px solid #
   .telemetry { grid-template-columns:1fr 1fr; }
   .strategic-map { min-height:330px; }
 }
+
+
+/* Stage 7 geographic gameplay */
+.world-layout { display:grid; grid-template-columns:minmax(0,2.2fr) minmax(300px,.8fr); gap:14px; margin-top:14px; }
+.world-map { margin-top:10px; overflow:hidden; border:1px solid #10233c; border-radius:14px; background:radial-gradient(circle at 50% 45%,rgba(33,91,160,.18),transparent 48%),#040b15; }
+.world-map svg { display:block; width:100%; height:auto; }
+.graticule line { stroke:#1a2b43; stroke-width:.6; opacity:.55; }
+.continents path { fill:#0e1c2b; stroke:#203a55; stroke-width:1.1; }
+.geo-link { stroke:#3b7ebd; opacity:.25; }
+.geo-link--hostile { stroke:#e36473; stroke-dasharray:5 4; opacity:.42; }
+.geo-actor { cursor:pointer; }
+.geo-actor circle { fill:#5be0c0; stroke:#d5fff5; stroke-width:1; filter:drop-shadow(0 0 6px rgba(91,224,192,.5)); }
+.geo-actor text { fill:#829bb9; font-size:10px; font-weight:750; pointer-events:none; }
+.geo-actor--active circle { fill:#6ea7ff; stroke:white; stroke-width:2; }
+.geo-actor--active text { fill:#f0f6ff; }
+.crisis-zone { cursor:pointer; }
+.crisis-zone circle:first-child { fill:rgba(235,86,103,.07); stroke:#e66071; stroke-width:1.3; stroke-dasharray:4 4; animation:pulseZone 2.4s ease-in-out infinite; }
+.crisis-zone__core { fill:#ff7483; stroke:none !important; }
+.crisis-zone--active circle:first-child { fill:rgba(255,92,110,.15); stroke:#ff8795; stroke-width:2.2; }
+@keyframes pulseZone { 50% { opacity:.55; } }
+
+.decision-panel form { display:grid; gap:9px; margin-top:12px; }
+.decision-panel label { display:flex; flex-direction:column; gap:6px; color:#7187a4; font-size:.69rem; text-transform:uppercase; letter-spacing:.08em; }
+.decision-panel button { border:0; border-radius:9px; min-height:42px; color:#031019; font-weight:900; letter-spacing:.07em; background:linear-gradient(135deg,#4a8fff,#2bd8af); }
+.action-result { margin:10px 0 0; padding:8px 10px; border-radius:8px; background:rgba(43,216,175,.08); color:#66e6c7; font-size:.72rem; }
+
+.detail-kpis,.scenario-summary { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; margin-top:12px; }
+.detail-kpis div,.scenario-summary div { padding:9px; border:1px solid #14273f; border-radius:9px; background:#07111f; }
+.detail-kpis span,.scenario-summary span,.detail-kpis strong,.scenario-summary strong { display:block; }
+.detail-kpis span,.scenario-summary span { color:#6e839e; font-size:.62rem; text-transform:uppercase; letter-spacing:.07em; }
+.detail-kpis strong,.scenario-summary strong { margin-top:4px; font-size:.9rem; }
+.scenario-bars { display:grid; gap:8px; margin-top:12px; }
+.scenario-bars > div { display:grid; grid-template-columns:90px 1fr 38px; gap:8px; align-items:center; color:#748aa7; font-size:.67rem; }
+.scenario-bars > div > div { height:6px; background:#101f32; border-radius:999px; overflow:hidden; }
+.scenario-bars i { display:block; height:100%; background:linear-gradient(90deg,#4c8fff,#50dec0); }
+.scenario-bars strong { color:#dce9fb; text-align:right; }
+
+.causal-list { display:grid; gap:7px; margin-top:12px; max-height:390px; overflow:auto; }
+.causal-step { display:grid; grid-template-columns:42px 1fr 48px 120px; gap:8px; align-items:center; padding:9px 10px; border:1px solid #13253e; border-radius:9px; background:#07111e; }
+.causal-step span { color:#5e7797; font-size:.65rem; }
+.causal-step strong { font-size:.76rem; }
+.causal-step em { color:#68dcbf; font-style:normal; font-weight:800; }
+.causal-step small { color:#6f84a0; text-align:right; }
+
+.tick-panel { margin-top:14px; }
+
+@media (max-width:1100px) {
+  .world-layout { grid-template-columns:1fr; }
+}
+@media (max-width:760px) {
+  .detail-kpis,.scenario-summary { grid-template-columns:1fr; }
+  .causal-step { grid-template-columns:34px 1fr 44px; }
+  .causal-step small { grid-column:2 / -1; text-align:left; }
+  .world-map svg { min-height:320px; }
+}
