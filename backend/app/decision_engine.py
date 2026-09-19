@@ -97,6 +97,7 @@ async def decide_all(
     options_by_actor: dict[str, list[dict]] = {}
     targets: dict[str, str | None] = {}
     assessments: dict[str, dict] = {}
+    beliefs_by_actor: dict[str, dict] = {}
 
     pair_relationships: dict[tuple[str, str], float] = {}
     for rel in relationships:
@@ -126,6 +127,8 @@ async def decide_all(
             if target_actor_id
             else {"threat": 0.5, "cooperation": 0.5, "credibility": 0.5, "uncertainty": 0.5}
         )
+
+        beliefs_by_actor[actor.id] = dict(belief)
 
         threat = _clamp(
             max(0.0, -relationship) * 0.38
@@ -259,7 +262,7 @@ async def decide_all(
             "crisis_intensity": selected.get("crisis_intensity", 0.0),
             "theory_assessment": assessments[actor.id],
             "strategic_posture": posture,
-            "belief_state": dict(belief),
+            "belief_state": beliefs_by_actor.get(actor.id, {}),
             "strategic_memory": (
                 get_memory(metadata, actor.id, target_actor_id)
                 if target_actor_id
