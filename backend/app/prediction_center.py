@@ -169,7 +169,7 @@ async def build_prediction_center(
             drivers = _scenario_drivers(base_drivers, scenario)
             for horizon in HORIZONS:
                 result = forecast(
-                    f"{actor.id}:stability:{scenario}",
+                    f"{actor.id}:stability",
                     state,
                     drivers,
                     horizon=horizon,
