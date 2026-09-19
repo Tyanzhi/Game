@@ -57,3 +57,21 @@ def test_secondary_crisis_uses_parent_linkage():
         generated.extend(g.advance(state, [make_event()], actors(), {}, tick, 99))
     if generated:
         assert generated[0].metadata["parent_crisis_id"]
+
+
+def test_interacting_crises_create_compounding_edge():
+    state = {}
+    g = CrisisGraph()
+    events = [
+        SimpleNamespace(event_id="energy-1", event_type="energy_disruption", actors=("A",), confidence=.9),
+        SimpleNamespace(event_id="econ-1", event_type="economic_crisis", actors=("A",), confidence=.9),
+    ]
+    g.advance(state, events, actors(), {}, 1, 11)
+    assert any(
+        edge["mechanism"] == "crisis_interaction"
+        for edge in state["crisis_graph"]["edges"]
+    )
+    assert any(
+        item.get("interaction_pressure", 0.0) > 0.0
+        for item in state["crisis_graph"]["history"]
+    )
