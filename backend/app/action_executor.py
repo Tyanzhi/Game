@@ -41,6 +41,22 @@ async def execute_action(session: AsyncSession, action_id: str) -> dict:
         if target_actor_id:
             query = query.where(RelationshipModel.target_actor_id == target_actor_id)
         rels = (await session.execute(query)).scalars().all()
+        if target_actor_id and not rels:
+            rel = RelationshipModel(
+                source_actor_id=actor.id,
+                target_actor_id=str(target_actor_id),
+                diplomatic=0.0,
+                economic=0.0,
+                military=0.0,
+                trade=0.0,
+                energy=0.0,
+                technology=0.0,
+                political=0.0,
+                information=0.0,
+            )
+            session.add(rel)
+            await session.flush()
+            rels = [rel]
         for rel in rels:
             rel.diplomatic = _clamp_rel(rel.diplomatic + 0.025)
         actor.domestic_pressure = _clamp(actor.domestic_pressure - 0.005)
