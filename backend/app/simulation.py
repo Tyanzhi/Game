@@ -61,7 +61,7 @@ def _action_effects_to_initial_effects(actions: list[dict]) -> list[Effect]:
     return initial
 
 
-async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_events=None, broadcast=None):
+async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_events=None, broadcast=None, controlled_actor_id: str | None = None):
     ticks = max(1, min(120, int(ticks)))
     simulation_id = simulation_id or f"sim-{uuid4().hex}"
     run = SimulationRunModel(id=simulation_id, mode="simulation", status="running", query="local")
@@ -117,7 +117,13 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
             await publish("perception", result)
             return result
         async def decision(ctx):
-            decisions = await decide_all(session, simulation_id, state.metadata, tick)
+            decisions = await decide_all(
+                session,
+                simulation_id,
+                state.metadata,
+                tick,
+                excluded_actor_ids={controlled_actor_id} if controlled_actor_id else None,
+            )
             result = {"count": len(decisions), "decisions": decisions}
             await publish("decision", result)
             return result
