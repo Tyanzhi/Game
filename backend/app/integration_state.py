@@ -84,7 +84,7 @@ async def load_world_state(session, simulation_id, tick=0, seed=0):
     }
     saved_relationships = state.metadata.setdefault('relationships', {})
     for key, values in db_relationships.items():
-        saved_relationships.setdefault(key, values)
+        saved_relationships.setdefault(key, {}).update(values)
     return state
 
 async def sync_world_state_to_db(session, state):
