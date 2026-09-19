@@ -147,6 +147,45 @@ export type PlayerActionResult = {
   effects: Record<string, unknown>;
 };
 
+
+export type LiveIntelligenceStatus = {
+  running: boolean;
+  last_started_at?: string | null;
+  last_finished_at?: string | null;
+  last_error?: string | null;
+  last_simulation_id?: string | null;
+  last_raw_events: number;
+  last_normalized_events: number;
+  last_new_events: number;
+  last_duplicates: number;
+  source_errors: Record<string, string>;
+};
+
+export type LiveWorldEvent = {
+  id: string;
+  event_type: string;
+  title: string;
+  description: string;
+  timestamp?: string | null;
+  confidence: number;
+  status: string;
+  source_count: number;
+  actors: string[];
+  source_urls: string[];
+};
+
+export type TurnResult = {
+  parent_simulation_id: string;
+  simulation_id: string;
+  controlled_actor_id: string;
+  action_points_start: number;
+  action_points_spent: number;
+  action_points_remaining: number;
+  resource_costs: Record<string, number>;
+  player_action: PlayerActionResult;
+  overview: StrategicOverview;
+};
+
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -159,7 +198,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  health: () => request<{ status: string; engine: string }>("/health"),
+  health: () => request<{ status: string; engine: string; live_intelligence?: LiveIntelligenceStatus }>("/health"),
   actors: () => request<Actor[]>("/api/actors"),
   simulations: () => request<Simulation[]>("/api/simulations"),
   ticks: (simulationId: string) =>
@@ -196,6 +235,29 @@ export const api = {
         body: JSON.stringify(payload)
       }
     ),
+  playTurn: (
+    simulationId: string,
+    payload: {
+      actor_id: string;
+      action_type: string;
+      target_actor_id?: string;
+      seed: number;
+      action_points?: number;
+    }
+  ) =>
+    request<TurnResult>(
+      `/api/simulations/${encodeURIComponent(simulationId)}/turns`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }
+    ),
+  liveStatus: () => request<LiveIntelligenceStatus>("/api/live-intelligence/status"),
+  liveEvents: (limit = 30) =>
+    request<LiveWorldEvent[]>(`/api/live-intelligence/events?limit=${limit}`),
+  runLiveNow: () =>
+    request<LiveIntelligenceStatus>("/api/live-intelligence/run-now", { method: "POST" }),
   runSimulation: (ticks: number, seed: number) =>
     request<{ simulation_id: string; ticks: number }>(
       `/api/simulations?ticks=${ticks}&seed=${seed}`,
