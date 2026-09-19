@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from .db import init_db, get_db, SessionLocal
@@ -12,6 +12,13 @@ from .scenario_engine import ScenarioEngine
 from .ws import ConnectionHub
 from .world_service import WorldRuntime, WorldEvent
 from .strategic_overview import strategic_overview
+from .strategic_gameplay import (
+    actor_detail,
+    causal_chain,
+    crisis_detail,
+    scenario_tree_detail,
+    submit_player_action,
+)
 
 _scheduler_task = None
 _scheduler_stop = asyncio.Event()
@@ -92,6 +99,62 @@ async def simulation_ticks(simulation_id: str, db: AsyncSession = Depends(get_db
 @app.get('/api/simulations/{simulation_id}/strategic-overview')
 async def simulation_strategic_overview(simulation_id: str, db: AsyncSession = Depends(get_db)):
     return await strategic_overview(db, simulation_id)
+
+@app.get('/api/simulations/{simulation_id}/actors/{actor_id}')
+async def simulation_actor_detail(simulation_id: str, actor_id: str, db: AsyncSession = Depends(get_db)):
+    try:
+        return await actor_detail(db, simulation_id, actor_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+@app.get('/api/simulations/{simulation_id}/crises/{crisis_id}')
+async def simulation_crisis_detail(simulation_id: str, crisis_id: str, db: AsyncSession = Depends(get_db)):
+    try:
+        return await crisis_detail(db, simulation_id, crisis_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+@app.get('/api/simulations/{simulation_id}/scenario-tree/{actor_id}')
+async def simulation_scenario_tree(
+    simulation_id: str,
+    actor_id: str,
+    depth: int = 3,
+    branching: int = 3,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await scenario_tree_detail(db, simulation_id, actor_id, depth, branching)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+@app.get('/api/simulations/{simulation_id}/causal-chain')
+async def simulation_causal_chain(
+    simulation_id: str,
+    limit: int = 120,
+    db: AsyncSession = Depends(get_db),
+):
+    return await causal_chain(db, simulation_id, limit)
+
+@app.post('/api/simulations/{simulation_id}/player-actions')
+async def simulation_player_action(
+    simulation_id: str,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await submit_player_action(
+            db,
+            simulation_id=simulation_id,
+            actor_id=str(payload.get('actor_id') or ''),
+            action_type=str(payload.get('action_type') or ''),
+            target_actor_id=(
+                str(payload.get('target_actor_id'))
+                if payload.get('target_actor_id') else None
+            ),
+            rationale=str(payload.get('rationale') or 'player_selected'),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 @app.post('/api/ingestion/sync')
 async def ingestion_sync(query: str = 'geopolitics', max_records: int = 25, db: AsyncSession = Depends(get_db)):
