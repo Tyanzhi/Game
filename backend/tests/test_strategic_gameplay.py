@@ -1,4 +1,5 @@
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models import ActorModel, Base, RelationshipModel, SimulationTickModel, WorldStateVersionModel
@@ -169,7 +170,7 @@ async def test_targeted_diplomacy_creates_missing_relationship():
 
         rows = (
             await session.execute(
-                __import__("sqlalchemy").select(RelationshipModel).where(
+                select(RelationshipModel).where(
                     RelationshipModel.source_actor_id == "A",
                     RelationshipModel.target_actor_id == "B",
                 )
