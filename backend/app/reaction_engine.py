@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass
 
-from .models import ActionModel, ActorModel, RelationshipModel
+from .models import ActionModel, ActorModel, DecisionModel, RelationshipModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -166,6 +166,22 @@ async def plan_reactions(
             "reaction_score": round(plan.score, 6),
         }
         effects = {k: v for k, v in effects.items() if v is not None}
+        session.add(
+            DecisionModel(
+                id=decision_id,
+                actor_id=plan.actor_id,
+                simulation_id=simulation_id,
+                situation=f"Reaction to action {plan.source_action_id}",
+                selected_action=plan.action_type,
+                confidence=max(0.0, min(1.0, float(actors[plan.actor_id].information_quality or 0.0))),
+                reasoning_factors=[plan.reason],
+                options=[{"action": plan.action_type, "score": plan.score}],
+                information_state=effects.copy(),
+            )
+        )
+        # The action references this decision in migrated PostgreSQL databases.
+        # Persist the parent first, even without ORM relationship mappings.
+        await session.flush()
         session.add(
             ActionModel(
                 id=action_id,

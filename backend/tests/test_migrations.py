@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import inspect, select, text
+from sqlalchemy import event, inspect, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models import ActorModel, Base, WorldStateVersionModel
@@ -22,8 +22,18 @@ def test_migrations_and_persisted_simulation(tmp_path, monkeypatch, starting_rev
     config = Config(str(backend / "alembic.ini"))
     config.set_main_option("script_location", str(backend / "alembic"))
 
-    async def seed_existing_actor():
+    def make_engine():
         engine = create_async_engine(url)
+        if engine.dialect.name == "sqlite":
+            @event.listens_for(engine.sync_engine, "connect")
+            def enable_foreign_keys(connection, _record):
+                cursor = connection.cursor()
+                cursor.execute("PRAGMA foreign_keys=ON")
+                cursor.close()
+        return engine
+
+    async def seed_existing_actor():
+        engine = make_engine()
         try:
             async with engine.begin() as conn:
                 await conn.execute(text("INSERT INTO actors (id, name, created_at, updated_at) "
@@ -32,7 +42,7 @@ def test_migrations_and_persisted_simulation(tmp_path, monkeypatch, starting_rev
             await engine.dispose()
 
     async def exercise():
-        engine = create_async_engine(url)
+        engine = make_engine()
         try:
             async with async_sessionmaker(engine, expire_on_commit=False)() as session:
                 for table in Base.metadata.sorted_tables:
@@ -55,7 +65,7 @@ def test_migrations_and_persisted_simulation(tmp_path, monkeypatch, starting_rev
             await engine.dispose()
 
     async def assert_empty():
-        engine = create_async_engine(url)
+        engine = make_engine()
         try:
             async with engine.connect() as conn:
                 tables = await conn.run_sync(lambda sync: inspect(sync).get_table_names())
