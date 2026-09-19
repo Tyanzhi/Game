@@ -81,3 +81,26 @@ player action
 ```
 
 The actor controlled by the player is excluded from AI decision generation during that turn.
+
+
+## Live Prediction Center
+
+The live timeline uses a persistent simulation id (default: `live-world`) instead of creating an isolated simulation for every monitoring cycle. This lets crisis state, beliefs, strategic memory, pending forecasts and forecast calibration evolve across successive real-world updates.
+
+Prediction Center endpoints:
+
+- `GET /api/live-intelligence/prediction-center`
+- `GET /api/simulations/{simulation_id}/prediction-center`
+
+The center exposes:
+
+- simultaneous 1 / 7 / 30 tick horizons;
+- actor-level probabilistic stability outlooks;
+- baseline, stabilization, escalation and economic-shock futures;
+- probabilistic causal graph edges derived from active crises and recent effects;
+- Brier calibration statistics accumulated after observed outcomes;
+- market-stress and active-crisis deltas versus the previous snapshot.
+
+Alternative futures share the same deterministic forecast noise so scenario differences come from assumptions/drivers rather than random variation.
+
+The Stage 7 frontend renders these outputs as a horizon switcher, scenario matrix, calibration panel and causal graph. New live evidence advances the same `live-world` timeline, so the displayed probabilities can change as new events are ingested.
