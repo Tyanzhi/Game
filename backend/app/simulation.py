@@ -13,7 +13,7 @@ from .event_engine import normalize
 from .event_propagation import EventPropagation
 from .forecasting_engine import forecast
 from .integration_state import load_world_state, persist_tick, sync_world_state_to_db
-from .models import ActorPerceptionModel, EffectModel, ForecastModel, SimulationRunModel
+from .models import ActorPerceptionModel, EffectModel, ForecastModel, SimulationRunModel, WorldStateVersionModel
 from .perception_engine import PerceptionEngine
 from .reaction_engine import plan_reactions
 from .realtime_pipeline import save_world_version
@@ -61,20 +61,55 @@ def _action_effects_to_initial_effects(actions: list[dict]) -> list[Effect]:
     return initial
 
 
-async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_events=None, broadcast=None, controlled_actor_id: str | None = None):
+async def run_simulation(
+    session,
+    ticks=5,
+    seed=0,
+    simulation_id=None,
+    raw_events=None,
+    broadcast=None,
+    controlled_actor_id: str | None = None,
+    mode: str = "simulation",
+):
     ticks = max(1, min(120, int(ticks)))
     simulation_id = simulation_id or f"sim-{uuid4().hex}"
-    run = SimulationRunModel(id=simulation_id, mode="simulation", status="running", query="local")
-    session.add(run)
-    await session.flush()
+
+    run = await session.get(SimulationRunModel, simulation_id)
+    if run is None:
+        run = SimulationRunModel(
+            id=simulation_id,
+            mode=mode,
+            status="running",
+            query="local",
+        )
+        session.add(run)
+        await session.flush()
+    else:
+        run.status = "running"
+        run.mode = mode
+        run.finished_at = None
+
     state = await load_world_state(session, simulation_id, 0, seed)
+    start_tick = int(state.tick)
+
+    latest_version = (
+        await session.execute(
+            select(WorldStateVersionModel)
+            .where(WorldStateVersionModel.simulation_id == simulation_id)
+            .order_by(WorldStateVersionModel.tick.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
     normalized = normalize(raw_events or [])
     event_ids = [event.event_id for event in normalized]
     from .event_store import persist_events
-    await persist_events(session, normalized)
+    new_events, duplicate_events = await persist_events(session, normalized)
     history = []
-    parent_hash = None
-    for tick in range(1, ticks + 1):
+    parent_hash = latest_version.state_hash if latest_version is not None else None
+
+    for step in range(1, ticks + 1):
+        tick = start_tick + step
         state.tick = tick
         changes: dict = {}
         phase_data: dict = {}
@@ -510,9 +545,10 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
             await broadcast({"type": "tick_completed", "simulation_id": simulation_id, "tick": tick, "state": snapshot_data, "phase": phase_data, "changes": changes})
         await event_bus.publish("simulation.tick_completed", {"simulation_id": simulation_id, "tick": tick, "state": snapshot_data, "phases": phase_data})
     run.status = "completed"
-    run.ticks = ticks
-    run.events_ingested = len(raw_events or [])
-    run.events_new = len(normalized)
+    run.ticks = start_tick + ticks
+    run.events_ingested = int(run.events_ingested or 0) + len(raw_events or [])
+    run.events_new = int(run.events_new or 0) + int(new_events)
+    run.events_deduplicated = int(run.events_deduplicated or 0) + int(duplicate_events)
     run.finished_at = datetime.now(timezone.utc)
     await session.commit()
     return {"simulation_id": simulation_id, "ticks": ticks, "history": history}
