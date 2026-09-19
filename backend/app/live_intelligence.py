@@ -116,6 +116,7 @@ class LiveIntelligenceState:
         self.last_new_events = 0
         self.last_duplicates = 0
         self.source_errors: dict[str, str] = {}
+        self.cycles_completed = 0
 
     def snapshot(self) -> dict:
         return {
@@ -129,6 +130,7 @@ class LiveIntelligenceState:
             "last_new_events": self.last_new_events,
             "last_duplicates": self.last_duplicates,
             "source_errors": dict(self.source_errors),
+            "cycles_completed": self.cycles_completed,
         }
 
 
@@ -154,10 +156,11 @@ async def run_live_intelligence_cycle(
         live_state.last_error = None
         simulation_id = None
         try:
+            include_world_bank = live_state.cycles_completed % 24 == 0
             raw, source_errors = await collect_live_events(
                 queries=queries,
                 max_records_per_query=max_records_per_query,
-                include_world_bank=False,
+                include_world_bank=include_world_bank,
             )
             normalized = normalize(raw)
 
@@ -187,6 +190,7 @@ async def run_live_intelligence_cycle(
             live_state.last_new_events = new_count
             live_state.last_duplicates = duplicate_count
             live_state.source_errors = source_errors
+            live_state.cycles_completed += 1
             return live_state.snapshot()
         except Exception as exc:
             live_state.last_error = str(exc)[:1000]
@@ -203,7 +207,7 @@ async def live_intelligence_loop(
     interval_seconds: int | None = None,
 ) -> None:
     stop_event = stop_event or asyncio.Event()
-    interval = interval_seconds or int(os.getenv("LIVE_INTELLIGENCE_INTERVAL_SECONDS", "900"))
+    interval = interval_seconds or int(os.getenv("LIVE_INTELLIGENCE_INTERVAL_SECONDS", "300"))
     interval = max(60, interval)
 
     while not stop_event.is_set():
