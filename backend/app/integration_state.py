@@ -2,7 +2,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass, field
 from sqlalchemy import select
-from .models import ActorModel, RelationshipModel, SimulationTickModel
+from .models import ActorModel, RelationshipModel, SimulationTickModel, WorldStateVersionModel
 
 TRACKED_FIELDS = (
     'stability', 'economic_capacity', 'diplomatic_capacity', 'security_capacity',
@@ -46,6 +46,21 @@ class WorldState:
 
 async def load_world_state(session, simulation_id, tick=0, seed=0):
     state = WorldState(tick=tick)
+    latest_version = (
+        await session.execute(
+            select(WorldStateVersionModel)
+            .where(WorldStateVersionModel.simulation_id == simulation_id)
+            .order_by(WorldStateVersionModel.tick.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if latest_version is not None:
+        saved = latest_version.state_json or {}
+        state.tick = int(saved.get("tick", latest_version.tick))
+        saved_metadata = saved.get("metadata")
+        if isinstance(saved_metadata, dict):
+            state.metadata = deepcopy(saved_metadata)
+
     actors = (await session.execute(select(ActorModel).order_by(ActorModel.id))).scalars().all()
     for actor in actors:
         state.actors[actor.id] = ActorState(
@@ -53,8 +68,13 @@ async def load_world_state(session, simulation_id, tick=0, seed=0):
             {field: float(getattr(actor, field, 0.0) or 0.0) for field in TRACKED_FIELDS},
         )
     relationships = (await session.execute(select(RelationshipModel))).scalars().all()
-    state.metadata['markets'] = {'global_trade': 0.0, 'energy_price': 0.0, 'financial_stress': 0.0, 'commodity_supply': 0.0}
-    state.metadata['relationships'] = {
+    state.metadata.setdefault('markets', {
+        'global_trade': 0.0,
+        'energy_price': 0.0,
+        'financial_stress': 0.0,
+        'commodity_supply': 0.0,
+    })
+    db_relationships = {
         f'{rel.source_actor_id}:{rel.target_actor_id}': {
             'diplomatic': float(rel.diplomatic or 0.0),
             'economic': float(rel.economic or 0.0),
@@ -62,6 +82,9 @@ async def load_world_state(session, simulation_id, tick=0, seed=0):
         }
         for rel in relationships
     }
+    saved_relationships = state.metadata.setdefault('relationships', {})
+    for key, values in db_relationships.items():
+        saved_relationships.setdefault(key, values)
     return state
 
 async def sync_world_state_to_db(session, state):
