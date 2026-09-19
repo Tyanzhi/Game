@@ -12,6 +12,11 @@ from .models import ActionModel, ActorModel, DecisionModel, RelationshipModel
 from .strategic_memory import get_memory
 from .strategic_dynamics import get_belief
 from .strategic_planning import plan_multi_horizon, repeated_game_state
+from .strategic_foresight import (
+    build_scenario_tree,
+    credible_commitment,
+    resource_feasibility,
+)
 
 
 def _clamp(value: float) -> float:
@@ -202,6 +207,10 @@ async def decide_all(
             elif action == "diplomatic_outreach":
                 score += opportunity * float(actor.strategic_patience) * 0.04
 
+            feasibility = resource_feasibility(action, actor_state)
+            if not feasibility["feasible"]:
+                score -= 0.25 + float(feasibility["strain"]) * 0.5
+
             options.append({
                 "action": action,
                 "expected_utility": _clamp(score),
@@ -212,6 +221,7 @@ async def decide_all(
                 "crisis_intensity": crisis,
                 "target_crisis_intensity": target_crisis,
                 "opportunity": max(0.0, target_crisis - crisis),
+                "resource_feasibility": feasibility,
             })
 
         options.sort(key=lambda item: (-item["expected_utility"], item["action"]))
@@ -277,6 +287,25 @@ async def decide_all(
             target_crisis,
             float(actor.risk_tolerance),
         )
+        scenario_tree = build_scenario_tree(
+            actor.id,
+            stability=float(actor.stability),
+            market_stress=float(planning_state["market_stress"]),
+            crisis_intensity=float(planning_state["crisis_intensity"]),
+            seed=tick,
+            depth=3,
+            branching=3,
+        )
+        commitment = credible_commitment(
+            {
+                "economic_capacity": actor.economic_capacity,
+                "security_capacity": actor.security_capacity,
+                "diplomatic_capacity": actor.diplomatic_capacity,
+            },
+            signal_credibility=float(belief.get("credibility", 0.5)),
+            sunk_cost=float(selected.get("risk", 0.0)),
+            domestic_pressure=float(actor.domestic_pressure),
+        )
 
         fingerprint = f"{simulation_id}|{tick}|{actor.id}|{selected['action']}|{target_actor_id or '-'}"
         decision_id = "decision-" + sha256(fingerprint.encode()).hexdigest()[:24]
@@ -297,6 +326,13 @@ async def decide_all(
             "belief_state": beliefs_by_actor.get(actor.id, {}),
             "repeated_game": repeated_state.__dict__,
             "strategic_plan": planning,
+            "scenario_tree_summary": {
+                "depth": scenario_tree["depth"],
+                "leaf_count": scenario_tree["leaf_count"],
+                "expected_stability": scenario_tree["expected_stability"],
+                "escalation_probability": scenario_tree["escalation_probability"],
+            },
+            "credible_commitment": commitment,
             "strategic_memory": (
                 get_memory(metadata, actor.id, target_actor_id)
                 if target_actor_id
@@ -329,6 +365,9 @@ async def decide_all(
             "planning_confidence": planning.get("planning_confidence", 0.0),
             "planning_horizons": planning.get("horizons", []),
             "repeated_game_equilibrium": repeated_state.equilibrium_hint,
+            "credible_commitment": commitment,
+            "resource_feasibility": selected.get("resource_feasibility", {}),
+            "scenario_tree": scenario_tree,
         }
         action_effects = {k: v for k, v in action_effects.items() if v is not None}
 
@@ -359,6 +398,13 @@ async def decide_all(
             "planning_horizons": planning.get("horizons", []),
             "repeated_game_equilibrium": repeated_state.equilibrium_hint,
             "counterfactuals": planning.get("counterfactuals", []),
+            "credible_commitment": commitment,
+            "resource_feasibility": selected.get("resource_feasibility", {}),
+            "scenario_tree_summary": {
+                "expected_stability": scenario_tree["expected_stability"],
+                "escalation_probability": scenario_tree["escalation_probability"],
+                "leaf_count": scenario_tree["leaf_count"],
+            },
         })
 
     await session.flush()
