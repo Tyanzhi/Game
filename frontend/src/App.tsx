@@ -8,6 +8,7 @@ import {
   LiveIntelligenceStatus,
   LiveOutlook,
   LiveWorldEvent,
+  PredictionCenter,
   Relationship,
   ScenarioTree,
   Simulation,
@@ -197,6 +198,178 @@ function CausalPanel({ chain }: { chain: CausalChain | null }) {
   );
 }
 
+
+function ProbabilityGraph({ center }: { center: PredictionCenter | null }) {
+  const nodes = (center?.causal_graph.nodes ?? []).slice(0, 18);
+  const edges = (center?.causal_graph.edges ?? []).slice(0, 30);
+  const crises = nodes.filter((node) => node.kind === "crisis");
+  const actors = nodes.filter((node) => node.kind === "actor");
+  const positions = new Map<string, { x: number; y: number }>();
+
+  crises.forEach((node, index) => {
+    positions.set(node.id, {
+      x: 105,
+      y: 42 + index * (190 / Math.max(1, crises.length - 1 || 1))
+    });
+  });
+  actors.forEach((node, index) => {
+    positions.set(node.id, {
+      x: 430,
+      y: 42 + index * (190 / Math.max(1, actors.length - 1 || 1))
+    });
+  });
+
+  return (
+    <svg className="probability-graph" viewBox="0 0 540 270" role="img" aria-label="Probabilistic causal graph">
+      {edges.map((edge, index) => {
+        const source = positions.get(edge.source);
+        const target = positions.get(edge.target);
+        if (!source || !target) return null;
+        return (
+          <line
+            key={`${edge.source}-${edge.target}-${index}`}
+            x1={source.x}
+            y1={source.y}
+            x2={target.x}
+            y2={target.y}
+            style={{ opacity: 0.18 + edge.probability * 0.65 }}
+          />
+        );
+      })}
+      {nodes.map((node) => {
+        const point = positions.get(node.id);
+        if (!point) return null;
+        return (
+          <g key={node.id} className={`prob-node prob-node--${node.kind}`}>
+            <circle cx={point.x} cy={point.y} r={7 + node.weight * 6} />
+            <text
+              x={node.kind === "crisis" ? point.x + 18 : point.x - 18}
+              y={point.y + 4}
+              textAnchor={node.kind === "crisis" ? "start" : "end"}
+            >
+              {node.label}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function PredictionCenterPanel({
+  center,
+  actorId,
+  horizon,
+  onHorizon
+}: {
+  center: PredictionCenter | null;
+  actorId: string;
+  horizon: number;
+  onHorizon: (value: number) => void;
+}) {
+  const actorForecast = center?.actors.find((item) => item.actor_id === actorId) ?? center?.actors[0];
+  const scenarios = center?.scenario_matrix.find((item) => item.actor_id === actorForecast?.actor_id);
+  const scenarioOrder = ["baseline", "stabilization", "escalation", "economic_shock"];
+  const horizonKey = String(horizon);
+
+  return (
+    <section className="prediction-center panel">
+      <div className="panel__heading prediction-heading">
+        <div>
+          <p className="eyebrow">LIVE PREDICTION CENTER</p>
+          <h2>Competing futures · calibrated probabilities</h2>
+        </div>
+        <div className="horizon-tabs" aria-label="Forecast horizon">
+          {[1, 7, 30].map((value) => (
+            <button
+              type="button"
+              key={value}
+              className={horizon === value ? "active" : ""}
+              onClick={() => onHorizon(value)}
+            >
+              {value}T
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {!center || !actorForecast || !scenarios ? (
+        <p className="muted prediction-empty">Prediction data will appear after a simulation snapshot exists.</p>
+      ) : (
+        <>
+          <div className="prediction-kpis">
+            <div>
+              <span>actor</span>
+              <strong>{actorForecast.actor_name}</strong>
+            </div>
+            <div>
+              <span>baseline expected</span>
+              <strong>{pct(actorForecast.horizons[horizonKey]?.expected)}</strong>
+            </div>
+            <div>
+              <span>uncertainty</span>
+              <strong>{pct(actorForecast.horizons[horizonKey]?.uncertainty)}</strong>
+            </div>
+            <div>
+              <span>Brier calibration</span>
+              <strong>
+                {center.calibration.mean_brier == null
+                  ? "unscored"
+                  : center.calibration.mean_brier.toFixed(3)}
+              </strong>
+              <small>{center.calibration.quality}</small>
+            </div>
+          </div>
+
+          <div className="prediction-layout">
+            <div>
+              <h3>Scenario matrix · {horizon} tick horizon</h3>
+              <div className="future-grid">
+                {scenarioOrder.map((scenario) => {
+                  const value = scenarios.scenarios[scenario]?.[horizonKey];
+                  return (
+                    <article key={scenario} className={`future-card future-card--${scenario}`}>
+                      <span>{scenario.replace(/_/g, " ")}</span>
+                      <strong>{pct(value?.expected)}</strong>
+                      <small>uncertainty {pct(value?.uncertainty)}</small>
+                      <div className="future-bar">
+                        <i style={{ width: pct(value?.expected) }} />
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+
+              <div className="prediction-delta">
+                <div>
+                  <span>market stress Δ</span>
+                  <strong>{signed(center.change_since_previous_snapshot.market_stress_delta)}</strong>
+                </div>
+                <div>
+                  <span>active crises Δ</span>
+                  <strong>{center.change_since_previous_snapshot.active_crises_delta}</strong>
+                </div>
+                <div>
+                  <span>scored targets</span>
+                  <strong>{center.calibration.scored_targets}</strong>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <h3>Probabilistic causal graph</h3>
+              <ProbabilityGraph center={center} />
+              <p className="muted graph-note">
+                Edge opacity encodes model probability; crisis nodes feed exposed actors and recent effects connect strategic actors.
+              </p>
+            </div>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 export default function App() {
   const [simulations, setSimulations] = useState<Simulation[]>([]);
   const [ticks, setTicks] = useState<Tick[]>([]);
@@ -222,6 +395,8 @@ export default function App() {
   const [liveStatus, setLiveStatus] = useState<LiveIntelligenceStatus | null>(null);
   const [worldEvents, setWorldEvents] = useState<LiveWorldEvent[]>([]);
   const [liveOutlook, setLiveOutlook] = useState<LiveOutlook | null>(null);
+  const [predictionCenter, setPredictionCenter] = useState<PredictionCenter | null>(null);
+  const [predictionHorizon, setPredictionHorizon] = useState(7);
   const [liveBusy, setLiveBusy] = useState(false);
 
   async function refreshBase() {
@@ -249,14 +424,16 @@ export default function App() {
   }
 
   async function refreshSimulation(simulationId: string) {
-    const [tickRows, strategic, chain] = await Promise.all([
+    const [tickRows, strategic, chain, predictions] = await Promise.all([
       api.ticks(simulationId),
       api.strategicOverview(simulationId),
-      api.causalChain(simulationId, 160)
+      api.causalChain(simulationId, 160),
+      api.predictionCenter(simulationId)
     ]);
     setTicks(tickRows);
     setOverview(strategic);
     setCausalChain(chain);
+    setPredictionCenter(predictions);
     if (!selectedActor && strategic.actors[0]) setSelectedActor(strategic.actors[0].id);
   }
 
@@ -535,6 +712,13 @@ export default function App() {
         </div>
         {liveStatus?.last_error && <p className="live-error">{liveStatus.last_error}</p>}
       </section>
+
+      <PredictionCenterPanel
+        center={predictionCenter}
+        actorId={actor?.id ?? ""}
+        horizon={predictionHorizon}
+        onHorizon={setPredictionHorizon}
+      />
 
       <section className="intel-grid">
         <article className="panel">
