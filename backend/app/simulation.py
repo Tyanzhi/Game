@@ -213,13 +213,53 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
             await publish("cascade", result)
             return result
         async def forecast_phase(ctx):
+            markets = state.metadata.get("markets", {})
+            crisis_nodes = state.metadata.get("crisis_graph", {}).get("nodes", {})
             for actor_id, actor in state.actors.items():
-                prediction = forecast(f"{actor_id}:stability", actor.values, {"economic": changes.get(actor_id, {}).get("economic_capacity", 0), "social": changes.get(actor_id, {}).get("domestic_pressure", 0) * -0.5}, 5, seed + tick)
+                actor_crisis = max(
+                    (
+                        float(node.get("intensity", 0.0))
+                        for node in crisis_nodes.values()
+                        if actor_id in set(node.get("participants", []))
+                        and node.get("phase") != "resolved"
+                    ),
+                    default=0.0,
+                )
+                drivers = {
+                    "economic": changes.get(actor_id, {}).get("economic_capacity", 0),
+                    "social": changes.get(actor_id, {}).get("domestic_pressure", 0) * -0.5,
+                    "crisis": -actor_crisis * 0.12,
+                    "financial_stress": -float(markets.get("financial_stress", 0.0)) * 0.08,
+                    "global_trade": float(markets.get("global_trade", 0.0)) * 0.05,
+                }
+                prediction = forecast(
+                    f"{actor_id}:stability",
+                    actor.values,
+                    drivers,
+                    5,
+                    seed + tick,
+                    base_rate=actor.values.get("stability", 0.5),
+                )
                 probabilities = prediction["probabilities"]
                 expected = probabilities["low"] * 0.25 + probabilities["medium"] * 0.50 + probabilities["high"] * 0.75
                 uncertainty = prediction["uncertainty"]
-                session.add(ForecastModel(simulation_id=simulation_id, tick=tick, target=prediction["target"], horizon=prediction["horizon"], expected=expected, lower=max(0.0, expected - uncertainty), upper=min(1.0, expected + uncertainty), confidence=max(0.0, 1.0 - uncertainty), drivers={"drivers": prediction["drivers"], "probabilities": probabilities}))
-            result = {"actors": len(state.actors)}
+                session.add(ForecastModel(
+                    simulation_id=simulation_id,
+                    tick=tick,
+                    target=prediction["target"],
+                    horizon=prediction["horizon"],
+                    expected=expected,
+                    lower=max(0.0, expected - uncertainty),
+                    upper=min(1.0, expected + uncertainty),
+                    confidence=max(0.0, 1.0 - uncertainty),
+                    drivers={
+                        "drivers": prediction["drivers"],
+                        "probabilities": probabilities,
+                        "ensemble": prediction["ensemble"],
+                        "calibration": prediction["calibration"],
+                    },
+                ))
+            result = {"actors": len(state.actors), "model_version": "forecast-v2"}
             await publish("forecast", result)
             return result
         async def snapshot(ctx):
