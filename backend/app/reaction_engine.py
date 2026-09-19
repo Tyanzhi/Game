@@ -24,6 +24,7 @@ class ReactionPlan:
     target_actor_id: str | None
     score: float
     reason: str
+    source_action_id: str
 
 
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
@@ -128,6 +129,7 @@ async def plan_reactions(
                 target_actor_id=source if selected == "diplomatic_outreach" else None,
                 score=response_intensity,
                 reason=reason,
+                source_action_id=str(action.get("action_id") or ""),
             )
         )
 
@@ -149,6 +151,7 @@ async def plan_reactions(
                     target_actor_id=target if third_action == "diplomatic_outreach" else None,
                     score=response_intensity * 0.55,
                     reason="third_party_intervention",
+                    source_action_id=str(action.get("action_id") or ""),
                 )
             )
 
@@ -156,10 +159,9 @@ async def plan_reactions(
     for index, plan in enumerate(plans):
         decision_id = f"reaction-decision-{simulation_id}-{seed}-{index}"
         action_id = f"reaction-action-{simulation_id}-{seed}-{index}"
-        source_action_id = source_actions[index % len(source_actions)]["action_id"] if source_actions else ""
         effects = {
             "target_actor_id": plan.target_actor_id,
-            "reaction_to_action_id": source_action_id,
+            "reaction_to_action_id": plan.source_action_id,
             "reaction_reason": plan.reason,
             "reaction_score": round(plan.score, 6),
         }
