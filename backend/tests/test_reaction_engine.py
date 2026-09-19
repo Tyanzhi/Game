@@ -74,7 +74,9 @@ def test_cascade_propagates_to_third_actor():
     assert [(e.source, e.target, e.depth) for e in result] == [
         ("A", "B", 0),
         ("B", "C", 1),
+        ("C", "A", 2),
     ]
+    assert max(e.depth for e in result) == 2
 
 
 def test_reactions_are_deterministic_for_same_seed():
