@@ -10,6 +10,7 @@ from .game_theory import apply_interaction_effects, build_interactions
 from .ir_theory import assess_ir_lenses, theory_adjustment
 from .models import ActionModel, ActorModel, DecisionModel, RelationshipModel
 from .strategic_memory import get_memory
+from .strategic_dynamics import get_belief
 
 
 def _clamp(value: float) -> float:
@@ -120,12 +121,18 @@ async def decide_all(
         )
         crisis = _crisis_intensity(metadata, actor.id)
         target_crisis = _crisis_intensity(metadata, target_actor_id) if target_actor_id else 0.0
+        belief = (
+            get_belief(metadata, actor.id, target_actor_id)
+            if target_actor_id
+            else {"threat": 0.5, "cooperation": 0.5, "credibility": 0.5, "uncertainty": 0.5}
+        )
 
         threat = _clamp(
-            max(0.0, -relationship) * 0.48
-            + crisis * 0.38
-            + float(actor.domestic_pressure) * 0.10
-            + max(0.0, rel_dict["military"]) * 0.16
+            max(0.0, -relationship) * 0.38
+            + crisis * 0.30
+            + float(actor.domestic_pressure) * 0.08
+            + max(0.0, rel_dict["military"]) * 0.12
+            + float(belief.get("threat", 0.5)) * 0.28
         )
         pressure = _clamp(float(actor.domestic_pressure) + financial_stress * 0.12)
         economic_signal = _clamp(
@@ -174,11 +181,15 @@ async def decide_all(
             if action == "diplomatic_outreach":
                 score += (float(memory.get("trust", 0.5)) - 0.5) * 0.16
                 score -= float(memory.get("hostility", 0.0)) * 0.08
+                score += (float(belief.get("cooperation", 0.5)) - 0.5) * 0.14
+                score += (float(belief.get("credibility", 0.5)) - 0.5) * 0.05
             elif action == "defensive_posture":
                 score += float(memory.get("hostility", 0.0)) * 0.12
                 score += theory.security_dilemma * 0.05
+                score += max(0.0, float(belief.get("threat", 0.5)) - 0.5) * 0.16
             elif action == "observe":
                 score += (1.0 - float(actor.information_quality)) * 0.10
+                score += float(belief.get("uncertainty", 0.5)) * 0.08
 
             # Strategic opportunity under asymmetric crisis exposure.
             opportunity = max(0.0, target_crisis - crisis)
@@ -248,6 +259,7 @@ async def decide_all(
             "crisis_intensity": selected.get("crisis_intensity", 0.0),
             "theory_assessment": assessments[actor.id],
             "strategic_posture": posture,
+            "belief_state": dict(belief),
             "strategic_memory": (
                 get_memory(metadata, actor.id, target_actor_id)
                 if target_actor_id
