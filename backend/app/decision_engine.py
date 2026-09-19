@@ -78,6 +78,7 @@ async def decide_all(
     simulation_id: str,
     world_metadata: dict | None = None,
     tick: int = 0,
+    excluded_actor_ids: set[str] | None = None,
 ) -> list[dict]:
     """
     Adaptive strategic decision layer.
@@ -93,6 +94,8 @@ async def decide_all(
     """
     metadata = world_metadata if world_metadata is not None else {}
     actors = (await session.execute(select(ActorModel).order_by(ActorModel.id))).scalars().all()
+    excluded_actor_ids = excluded_actor_ids or set()
+    actors = [actor for actor in actors if actor.id not in excluded_actor_ids]
     relationships = (await session.execute(select(RelationshipModel))).scalars().all()
 
     markets = metadata.get("markets", {})
