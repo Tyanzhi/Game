@@ -186,6 +186,32 @@ export type TurnResult = {
   overview: StrategicOverview;
 };
 
+
+export type LiveOutlook = {
+  simulation_id?: string | null;
+  status: string;
+  tick?: number;
+  future_events: Array<{
+    parent_crisis_id: string;
+    event_type: string;
+    participants: string[];
+    probability: number;
+    confidence: number;
+    horizon_ticks: number;
+    mechanism: string;
+  }>;
+  next_actor_steps: Array<{
+    actor_id: string;
+    action: string;
+    target_actor_id?: string | null;
+    confidence: number;
+    strategic_posture?: string | null;
+    crisis_intensity?: number;
+    mechanism: string;
+  }>;
+  forecasts: Forecast[];
+};
+
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -256,6 +282,8 @@ export const api = {
   liveStatus: () => request<LiveIntelligenceStatus>("/api/live-intelligence/status"),
   liveEvents: (limit = 30) =>
     request<LiveWorldEvent[]>(`/api/live-intelligence/events?limit=${limit}`),
+  liveOutlook: () =>
+    request<LiveOutlook>("/api/live-intelligence/outlook"),
   runLiveNow: () =>
     request<LiveIntelligenceStatus>("/api/live-intelligence/run-now", { method: "POST" }),
   runSimulation: (ticks: number, seed: number) =>
