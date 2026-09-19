@@ -11,6 +11,7 @@ from .ir_theory import assess_ir_lenses, theory_adjustment
 from .models import ActionModel, ActorModel, DecisionModel, RelationshipModel
 from .strategic_memory import get_memory
 from .strategic_dynamics import get_belief
+from .strategic_planning import plan_multi_horizon, repeated_game_state
 
 
 def _clamp(value: float) -> float:
@@ -228,15 +229,46 @@ async def decide_all(
     for actor in actors:
         options = adjusted_options[actor.id]
         options.sort(key=lambda item: (-float(item["expected_utility"]), item["action"]))
-        selected = options[0]
-        runner_up = options[1] if len(options) > 1 else selected
+        target_actor_id = targets[actor.id]
+        belief = beliefs_by_actor.get(actor.id, {})
+        memory = (
+            get_memory(metadata, actor.id, target_actor_id)
+            if target_actor_id else {}
+        )
+        repeated_state = repeated_game_state(memory, belief)
+
+        planning_state = {
+            "risk_tolerance": float(actor.risk_tolerance),
+            "crisis_intensity": _crisis_intensity(metadata, actor.id),
+            "market_stress": _clamp(
+                abs(float(markets.get("financial_stress", 0.0)))
+                + abs(float(markets.get("energy_price", 0.0))) * 0.5
+            ),
+        }
+        planning = plan_multi_horizon(
+            actor.id,
+            options,
+            planning_state,
+            belief,
+            metadata,
+            seed=tick,
+        )
+        planned_action = planning["selected_action"]
+        selected = next(
+            (option for option in options if option["action"] == planned_action),
+            options[0],
+        )
+        runner_up = next(
+            (option for option in options if option["action"] != selected["action"]),
+            selected,
+        )
 
         confidence = _clamp(
-            0.40
-            + abs(float(selected["expected_utility"]) - float(runner_up["expected_utility"])) * 1.7
-            + float(actor.information_quality) * 0.22
+            0.34
+            + abs(float(selected["expected_utility"]) - float(runner_up["expected_utility"])) * 1.2
+            + float(actor.information_quality) * 0.18
+            + float(planning.get("planning_confidence", 0.0)) * 0.28
         )
-        target_actor_id = targets[actor.id]
         target_crisis = _crisis_intensity(metadata, target_actor_id) if target_actor_id else 0.0
         posture = _strategic_posture(
             selected["action"],
@@ -263,6 +295,8 @@ async def decide_all(
             "theory_assessment": assessments[actor.id],
             "strategic_posture": posture,
             "belief_state": beliefs_by_actor.get(actor.id, {}),
+            "repeated_game": repeated_state.__dict__,
+            "strategic_plan": planning,
             "strategic_memory": (
                 get_memory(metadata, actor.id, target_actor_id)
                 if target_actor_id
@@ -292,6 +326,9 @@ async def decide_all(
             "theory_assessment": assessments[actor.id],
             "strategic_mechanisms": sorted(set(interaction_mechanisms.get(actor.id, []))),
             "strategic_posture": posture,
+            "planning_confidence": planning.get("planning_confidence", 0.0),
+            "planning_horizons": planning.get("horizons", []),
+            "repeated_game_equilibrium": repeated_state.equilibrium_hint,
         }
         action_effects = {k: v for k, v in action_effects.items() if v is not None}
 
@@ -318,6 +355,10 @@ async def decide_all(
             "theory_assessment": assessments[actor.id],
             "strategic_mechanisms": sorted(set(interaction_mechanisms.get(actor.id, []))),
             "strategic_posture": posture,
+            "planning_confidence": planning.get("planning_confidence", 0.0),
+            "planning_horizons": planning.get("horizons", []),
+            "repeated_game_equilibrium": repeated_state.equilibrium_hint,
+            "counterfactuals": planning.get("counterfactuals", []),
         })
 
     await session.flush()
