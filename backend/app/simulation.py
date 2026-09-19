@@ -18,6 +18,7 @@ from .perception_engine import PerceptionEngine
 from .reaction_engine import plan_reactions
 from .realtime_pipeline import save_world_version
 from .simulation_tick import SimulationTickEngine, TickContext
+from .strategic_memory import decay_memory, update_memory_from_action
 
 
 _ACTION_EFFECT_FIELDS = {
@@ -73,7 +74,12 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
             await publish("ingest", result)
             return result
         async def state_update(ctx):
-            result = {"tick": state.tick, "actors": len(state.actors)}
+            decay_memory(state.metadata)
+            result = {
+                "tick": state.tick,
+                "actors": len(state.actors),
+                "strategic_memory_edges": len(state.metadata.get("strategic_memory", {})),
+            }
             await publish("state_update", result)
             return result
         async def perception(ctx):
@@ -88,7 +94,7 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
             await publish("perception", result)
             return result
         async def decision(ctx):
-            decisions = await decide_all(session, simulation_id)
+            decisions = await decide_all(session, simulation_id, state.metadata, tick)
             result = {"count": len(decisions), "decisions": decisions}
             await publish("decision", result)
             return result
@@ -114,6 +120,23 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
                 )
 
             actions = primary_actions + reaction_actions
+
+            for executed in actions:
+                if executed.get("status") != "executed":
+                    continue
+                effects = executed.get("effects") or {}
+                source_actor_id = executed.get("actor_id")
+                target_actor_id = effects.get("target_actor_id")
+                action_type = effects.get("action")
+                if source_actor_id and target_actor_id and action_type:
+                    update_memory_from_action(
+                        state.metadata,
+                        observer=str(target_actor_id),
+                        counterpart=str(source_actor_id),
+                        action_type=str(action_type),
+                        magnitude=float(effects.get("reaction_score", 1.0) or 1.0),
+                    )
+
             result = {
                 "actions": actions,
                 "count": len(actions),
