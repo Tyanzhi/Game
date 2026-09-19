@@ -19,6 +19,15 @@ from .reaction_engine import plan_reactions
 from .realtime_pipeline import save_world_version
 from .simulation_tick import SimulationTickEngine, TickContext
 from .strategic_memory import decay_memory, update_memory_from_action
+from .strategic_dynamics import (
+    build_coalitions,
+    nash_bargain,
+    pop_due_effects,
+    schedule_delayed_effects,
+    signal_profile,
+    update_belief_from_action,
+    update_forecast_calibration,
+)
 
 
 _ACTION_EFFECT_FIELDS = {
@@ -75,10 +84,21 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
             return result
         async def state_update(ctx):
             decay_memory(state.metadata)
+            due_effects = pop_due_effects(state.metadata, tick)
+            for effect in due_effects:
+                target = str(effect["target"])
+                field = str(effect["field"])
+                delta = float(effect["delta"])
+                state.apply_delta(target, field, delta)
+                changes.setdefault(target, {})[field] = changes.setdefault(target, {}).get(field, 0.0) + delta
+
             result = {
                 "tick": state.tick,
                 "actors": len(state.actors),
                 "strategic_memory_edges": len(state.metadata.get("strategic_memory", {})),
+                "belief_edges": len(state.metadata.get("beliefs", {})),
+                "delayed_effects_applied": len(due_effects),
+                "delayed_effects_pending": len(state.metadata.get("delayed_effects", [])),
             }
             await publish("state_update", result)
             return result
@@ -99,7 +119,51 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
             await publish("decision", result)
             return result
         async def interaction(ctx):
-            result = {"status": "no_interaction_handler"}
+            decisions = ctx.phase_results.get("decision", {}).get("decisions", [])
+            actor_values = {actor_id: actor.values for actor_id, actor in state.actors.items()}
+            coalitions = build_coalitions(
+                actor_values,
+                state.metadata.get("relationships", {}),
+                state.metadata.get("crisis_graph", {}),
+            )
+
+            bargains = []
+            diplomatic = [
+                item for item in decisions
+                if item.get("action") == "diplomatic_outreach"
+                and item.get("target_actor_id")
+            ]
+            by_actor = {item["actor_id"]: item for item in diplomatic}
+            seen_pairs = set()
+            for item in diplomatic:
+                actor_a = item["actor_id"]
+                actor_b = item["target_actor_id"]
+                pair = tuple(sorted((actor_a, actor_b)))
+                if pair in seen_pairs or actor_b not in by_actor:
+                    continue
+                seen_pairs.add(pair)
+                other = by_actor[actor_b]
+                bargain = nash_bargain(
+                    actor_a,
+                    actor_b,
+                    float(item.get("expected_utility", 0.0)),
+                    float(other.get("expected_utility", 0.0)),
+                    float(item.get("risk", 0.0)),
+                    float(other.get("risk", 0.0)),
+                )
+                bargains.append(bargain.__dict__)
+                if bargain.accepted:
+                    state.apply_relationship_delta(actor_a, actor_b, "diplomatic", 0.01)
+                    state.apply_relationship_delta(actor_b, actor_a, "diplomatic", 0.01)
+
+            state.metadata["coalitions"] = coalitions
+            state.metadata["bargaining"] = bargains
+            result = {
+                "coalitions": coalitions,
+                "coalition_count": len(coalitions),
+                "bargains": bargains,
+                "accepted_bargains": sum(1 for item in bargains if item["accepted"]),
+            }
             await publish("interaction", result)
             return result
         async def action(ctx):
@@ -121,6 +185,8 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
 
             actions = primary_actions + reaction_actions
 
+            scheduled_delayed = 0
+            signals = []
             for executed in actions:
                 if executed.get("status") != "executed":
                     continue
@@ -128,7 +194,37 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
                 source_actor_id = executed.get("actor_id")
                 target_actor_id = effects.get("target_actor_id")
                 action_type = effects.get("action")
-                if source_actor_id and target_actor_id and action_type:
+                if not source_actor_id or not action_type:
+                    continue
+
+                source_state = state.actors.get(str(source_actor_id))
+                if source_state is not None:
+                    signal = signal_profile(
+                        str(source_actor_id),
+                        str(action_type),
+                        float(source_state.values.get("risk_tolerance", 0.5)),
+                        float(source_state.values.get("information_quality", 0.7)),
+                        seed,
+                        tick,
+                    )
+                    signals.append({
+                        "actor_id": source_actor_id,
+                        "target_actor_id": target_actor_id,
+                        "action": action_type,
+                        **signal,
+                    })
+                else:
+                    signal = {"credibility": 0.5}
+
+                scheduled_delayed += len(schedule_delayed_effects(
+                    state.metadata,
+                    str(source_actor_id),
+                    str(action_type),
+                    tick,
+                    str(executed.get("action_id") or ""),
+                ))
+
+                if target_actor_id:
                     update_memory_from_action(
                         state.metadata,
                         observer=str(target_actor_id),
@@ -136,6 +232,17 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
                         action_type=str(action_type),
                         magnitude=float(effects.get("reaction_score", 1.0) or 1.0),
                     )
+                    target_state = state.actors.get(str(target_actor_id))
+                    if target_state is not None:
+                        update_belief_from_action(
+                            state.metadata,
+                            observer=str(target_actor_id),
+                            counterpart=str(source_actor_id),
+                            action_type=str(action_type),
+                            information_quality=float(target_state.values.get("information_quality", 0.7)),
+                            credibility=float(signal.get("credibility", 0.5)),
+                            tick=tick,
+                        )
 
             result = {
                 "actions": actions,
@@ -143,6 +250,8 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
                 "primary_actions": len(primary_actions),
                 "reaction_actions": len(reaction_actions),
                 "planned_shocks": shocks,
+                "signals": signals,
+                "delayed_effects_scheduled": scheduled_delayed,
             }
             await publish("action", result)
             return result
@@ -215,6 +324,27 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
         async def forecast_phase(ctx):
             markets = state.metadata.get("markets", {})
             crisis_nodes = state.metadata.get("crisis_graph", {}).get("nodes", {})
+
+            calibration_updates = 0
+            pending = state.metadata.setdefault("pending_forecasts", [])
+            remaining_pending = []
+            for pending_forecast in pending:
+                if int(pending_forecast.get("due_tick", 0)) <= tick:
+                    target = str(pending_forecast["target"])
+                    actor_id, field = target.split(":", 1)
+                    actor_state = state.actors.get(actor_id)
+                    if actor_state is not None:
+                        observed_value = float(actor_state.values.get(field, 0.5))
+                        update_forecast_calibration(
+                            state.metadata,
+                            target,
+                            float(pending_forecast.get("high_probability", 0.5)),
+                            observed_high=observed_value >= 0.66,
+                        )
+                        calibration_updates += 1
+                else:
+                    remaining_pending.append(pending_forecast)
+            state.metadata["pending_forecasts"] = remaining_pending
             for actor_id, actor in state.actors.items():
                 actor_crisis = max(
                     (
@@ -259,7 +389,18 @@ async def run_simulation(session, ticks=5, seed=0, simulation_id=None, raw_event
                         "calibration": prediction["calibration"],
                     },
                 ))
-            result = {"actors": len(state.actors), "model_version": "forecast-v2"}
+                state.metadata.setdefault("pending_forecasts", []).append({
+                    "target": prediction["target"],
+                    "origin_tick": tick,
+                    "due_tick": tick + int(prediction["horizon"]),
+                    "high_probability": probabilities["high"],
+                })
+            result = {
+                "actors": len(state.actors),
+                "model_version": "forecast-v2",
+                "calibration_updates": calibration_updates,
+                "calibrated_targets": len(state.metadata.get("forecast_calibration", {})),
+            }
             await publish("forecast", result)
             return result
         async def snapshot(ctx):
