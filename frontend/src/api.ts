@@ -212,6 +212,65 @@ export type LiveOutlook = {
   forecasts: Forecast[];
 };
 
+
+export type PredictionCenter = {
+  simulation_id: string;
+  tick: number;
+  horizons: number[];
+  actors: Array<{
+    actor_id: string;
+    actor_name: string;
+    current_stability: number;
+    crisis_intensity: number;
+    horizons: Record<string, {
+      expected: number;
+      probabilities: Record<string, number>;
+      uncertainty: number;
+      ensemble: Record<string, number>;
+      drivers: string[];
+    }>;
+    calibration: {
+      count: number;
+      mean_brier: number | null;
+      quality: string;
+    };
+  }>;
+  scenario_matrix: Array<{
+    actor_id: string;
+    actor_name: string;
+    scenarios: Record<string, Record<string, {
+      expected: number;
+      uncertainty: number;
+      probabilities: Record<string, number>;
+    }>>;
+  }>;
+  causal_graph: {
+    nodes: Array<{
+      id: string;
+      kind: string;
+      label: string;
+      weight: number;
+    }>;
+    edges: Array<{
+      source: string;
+      target: string;
+      probability: number;
+      mechanism: string;
+    }>;
+  };
+  calibration: {
+    scored_targets: number;
+    mean_brier: number | null;
+    quality: string;
+  };
+  change_since_previous_snapshot: {
+    market_stress_delta: number;
+    active_crises_delta: number;
+    previous_tick: number | null;
+  };
+  model_version: string;
+};
+
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -284,6 +343,20 @@ export const api = {
     request<LiveWorldEvent[]>(`/api/live-intelligence/events?limit=${limit}`),
   liveOutlook: () =>
     request<LiveOutlook>("/api/live-intelligence/outlook"),
+  predictionCenter: (simulationId: string) =>
+    request<PredictionCenter>(
+      `/api/simulations/${encodeURIComponent(simulationId)}/prediction-center`
+    ),
+  livePredictionCenter: () =>
+    request<PredictionCenter | {
+      simulation_id: null;
+      status: string;
+      horizons: number[];
+      actors: [];
+      scenario_matrix: [];
+      causal_graph: { nodes: []; edges: [] };
+      calibration: { scored_targets: number; mean_brier: null; quality: string };
+    }>("/api/live-intelligence/prediction-center"),
   runLiveNow: () =>
     request<LiveIntelligenceStatus>("/api/live-intelligence/run-now", { method: "POST" }),
   runSimulation: (ticks: number, seed: number) =>
