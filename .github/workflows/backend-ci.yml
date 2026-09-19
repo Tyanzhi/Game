@@ -67,3 +67,49 @@ jobs:
         run: npm install
       - name: Build frontend
         run: npm run build
+
+
+  production-runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate production compose
+        env:
+          POSTGRES_PASSWORD: test_password
+        run: docker compose -f docker-compose.prod.yml config
+      - name: Build production backend image
+        run: docker build -t world-engine-backend:ci ./backend
+      - name: Start production runtime
+        env:
+          POSTGRES_PASSWORD: test_password
+          WORLD_ENGINE_API_PORT: "8000"
+          LIVE_INTELLIGENCE_INTERVAL_SECONDS: "3600"
+        run: docker compose -f docker-compose.prod.yml up -d --build
+      - name: Wait for API readiness
+        run: |
+          for i in $(seq 1 40); do
+            if curl --fail --silent http://127.0.0.1:8000/health/ready; then
+              exit 0
+            fi
+            sleep 3
+          done
+          docker compose -f docker-compose.prod.yml ps
+          docker compose -f docker-compose.prod.yml logs api live-worker migrate
+          exit 1
+      - name: Verify runtime roles
+        env:
+          POSTGRES_PASSWORD: test_password
+        run: |
+          curl --fail http://127.0.0.1:8000/health/live
+          docker compose -f docker-compose.prod.yml ps --status running api
+          docker compose -f docker-compose.prod.yml ps --status running live-worker
+      - name: Runtime logs on failure
+        if: failure()
+        env:
+          POSTGRES_PASSWORD: test_password
+        run: docker compose -f docker-compose.prod.yml logs --no-color
+      - name: Stop production runtime
+        if: always()
+        env:
+          POSTGRES_PASSWORD: test_password
+        run: docker compose -f docker-compose.prod.yml down -v
