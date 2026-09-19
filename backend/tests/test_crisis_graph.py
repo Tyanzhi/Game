@@ -41,7 +41,7 @@ def test_crisis_can_contagiously_reach_connected_actor():
         actors(),
         {"C:A": {"diplomatic": 1.0, "economic": 1.0}},
         1,
-        1,
+        2,
     )
     nodes = state["crisis_graph"]["nodes"]
     participants = next(iter(nodes.values()))["participants"]
