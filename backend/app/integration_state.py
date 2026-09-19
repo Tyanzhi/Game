@@ -1,4 +1,5 @@
 from __future__ import annotations
+from copy import deepcopy
 from dataclasses import dataclass, field
 from sqlalchemy import select
 from .models import ActorModel, RelationshipModel, SimulationTickModel
@@ -40,7 +41,7 @@ class WorldState:
         return {
             'tick': self.tick,
             'actors': {key: value.snapshot() for key, value in self.actors.items()},
-            'metadata': self.metadata,
+            'metadata': deepcopy(self.metadata),
         }
 
 async def load_world_state(session, simulation_id, tick=0, seed=0):
