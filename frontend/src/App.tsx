@@ -356,7 +356,7 @@ export default function App() {
       setActionResult(
         `turn completed · spent ${result.action_points_spent} AP · AI responded`
       );
-      setActionPoints(result.action_points_remaining || 2);
+      setActionPoints(2);
       setSelectedSimulation(result.simulation_id);
       setOverview(result.overview);
       await refreshBase();
