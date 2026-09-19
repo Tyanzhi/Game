@@ -30,7 +30,8 @@ async def execute_action(session: AsyncSession, action_id: str) -> dict:
         await session.flush()
         return {"action_id": action.id, "actor_id": action.actor_id, "status": action.status, "effects": action.effects}
 
-    effects: dict[str, object] = {"action": action.action_type}
+    effects: dict[str, object] = dict(action.effects or {})
+    effects["action"] = action.action_type
     if action.action_type == "observe":
         actor.information_quality = _clamp(actor.information_quality + 0.015)
         effects["information_quality_delta"] = 0.015
