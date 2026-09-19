@@ -22,8 +22,8 @@ async def test_strategic_overview_aggregates_latest_state():
     Session = async_sessionmaker(engine, expire_on_commit=False)
     async with Session() as session:
         session.add_all([
-            ActorModel(id="A", name="Alpha"),
-            ActorModel(id="B", name="Beta"),
+            ActorModel(id="A", name="Alpha", stability=0.81, economic_capacity=0.74),
+            ActorModel(id="B", name="Beta", stability=0.62, economic_capacity=0.68),
             RelationshipModel(
                 source_actor_id="A", target_actor_id="B",
                 diplomatic=0.4, economic=0.6, military=0.1
