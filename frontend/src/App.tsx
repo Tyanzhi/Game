@@ -5,6 +5,9 @@ import {
   CausalChain,
   Crisis,
   CrisisDetail,
+  LiveIntelligenceStatus,
+  LiveOutlook,
+  LiveWorldEvent,
   Relationship,
   ScenarioTree,
   Simulation,
@@ -215,17 +218,34 @@ export default function App() {
   const [actionTarget, setActionTarget] = useState("");
   const [actionBusy, setActionBusy] = useState(false);
   const [actionResult, setActionResult] = useState("");
+  const [actionPoints, setActionPoints] = useState(2);
+  const [liveStatus, setLiveStatus] = useState<LiveIntelligenceStatus | null>(null);
+  const [worldEvents, setWorldEvents] = useState<LiveWorldEvent[]>([]);
+  const [liveOutlook, setLiveOutlook] = useState<LiveOutlook | null>(null);
+  const [liveBusy, setLiveBusy] = useState(false);
 
   async function refreshBase() {
     try {
       const [health, simulationRows] = await Promise.all([api.health(), api.simulations()]);
       setEngineStatus(health.status);
       setSimulations(simulationRows);
+      if (health.live_intelligence) setLiveStatus(health.live_intelligence);
       if (!selectedSimulation && simulationRows[0]) setSelectedSimulation(simulationRows[0].id);
     } catch (err) {
       setEngineStatus("offline");
       setError(err instanceof Error ? err.message : "API unavailable");
     }
+  }
+
+  async function refreshLive() {
+    const [status, events, outlook] = await Promise.all([
+      api.liveStatus(),
+      api.liveEvents(20),
+      api.liveOutlook()
+    ]);
+    setLiveStatus(status);
+    setWorldEvents(events);
+    setLiveOutlook(outlook);
   }
 
   async function refreshSimulation(simulationId: string) {
@@ -242,8 +262,13 @@ export default function App() {
 
   useEffect(() => {
     refreshBase();
-    const timer = window.setInterval(refreshBase, 10000);
-    return () => window.clearInterval(timer);
+    refreshLive().catch(() => undefined);
+    const baseTimer = window.setInterval(refreshBase, 10000);
+    const liveTimer = window.setInterval(() => refreshLive().catch(() => undefined), 60000);
+    return () => {
+      window.clearInterval(baseTimer);
+      window.clearInterval(liveTimer);
+    };
   }, []);
 
   useEffect(() => {
@@ -321,19 +346,44 @@ export default function App() {
     setActionBusy(true);
     setActionResult("");
     try {
-      const result = await api.playerAction(selectedSimulation, {
+      const result = await api.playTurn(selectedSimulation, {
         actor_id: actor.id,
         action_type: actionType,
         target_actor_id: actionTarget || undefined,
-        rationale: "player_command_interface"
+        seed,
+        action_points: actionPoints
       });
-      setActionResult(`${result.status}: ${actionType}`);
-      await refreshSimulation(selectedSimulation);
-      setActorDetail(await api.actorDetail(selectedSimulation, actor.id));
+      setActionResult(
+        `turn completed · spent ${result.action_points_spent} AP · AI responded`
+      );
+      setActionPoints(result.action_points_remaining || 2);
+      setSelectedSimulation(result.simulation_id);
+      setOverview(result.overview);
+      await refreshBase();
+      await refreshSimulation(result.simulation_id);
+      setActorDetail(await api.actorDetail(result.simulation_id, actor.id));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Player action failed");
+      setError(err instanceof Error ? err.message : "Turn failed");
     } finally {
       setActionBusy(false);
+    }
+  }
+
+  async function syncLiveNow() {
+    setLiveBusy(true);
+    setError("");
+    try {
+      const status = await api.runLiveNow();
+      setLiveStatus(status);
+      await refreshLive();
+      if (status.last_simulation_id) {
+        setSelectedSimulation(status.last_simulation_id);
+        await refreshSimulation(status.last_simulation_id);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Live intelligence sync failed");
+    } finally {
+      setLiveBusy(false);
     }
   }
 
@@ -413,15 +463,77 @@ export default function App() {
           </article>
 
           <article className="panel decision-panel">
-            <p className="eyebrow">PLAYER DECISION</p>
+            <div className="panel__heading">
+              <div><p className="eyebrow">TURN MODE</p><h2>Player command</h2></div>
+              <span className="ap-badge">{actionPoints} AP</span>
+            </div>
             <form onSubmit={submitAction}>
               <label>Action<select value={actionType} onChange={(e) => setActionType(e.target.value)}>{ACTIONS.map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></label>
               <label>Target<select value={actionTarget} onChange={(e) => setActionTarget(e.target.value)}><option value="">No target</option>{actionTargets.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-              <button disabled={actionBusy || !actor}>{actionBusy ? "EXECUTING…" : "EXECUTE ACTION"}</button>
+              <button disabled={actionBusy || !actor}>{actionBusy ? "RESOLVING TURN…" : "COMMIT TURN"}</button>
             </form>
+            <p className="muted turn-note">Your action resolves first; AI controls every other actor in the same turn.</p>
             {actionResult && <p className="action-result">{actionResult}</p>}
           </article>
         </aside>
+      </section>
+
+      <section className="live-intelligence panel">
+        <div className="panel__heading">
+          <div>
+            <p className="eyebrow">LIVE WORLD INTELLIGENCE</p>
+            <h2>Real events → simulation → outlook</h2>
+          </div>
+          <button className="secondary-action" type="button" onClick={syncLiveNow} disabled={liveBusy}>
+            {liveBusy ? "SYNCING…" : "SYNC NOW"}
+          </button>
+        </div>
+        <div className="live-kpis">
+          <div><span>monitor</span><strong>{liveStatus?.running ? "RUNNING" : "IDLE"}</strong></div>
+          <div><span>new events</span><strong>{liveStatus?.last_new_events ?? 0}</strong></div>
+          <div><span>normalized</span><strong>{liveStatus?.last_normalized_events ?? 0}</strong></div>
+          <div><span>live run</span><strong>{liveStatus?.last_simulation_id ? "READY" : "—"}</strong></div>
+        </div>
+        <div className="live-columns">
+          <div>
+            <h3>Latest world events</h3>
+            <div className="world-event-list">
+              {worldEvents.slice(0, 8).map((item) => (
+                <div key={item.id}>
+                  <span>{item.event_type}</span>
+                  <strong>{item.title}</strong>
+                  <small>{pct(item.confidence)} confidence · {item.actors.join(" · ") || "unlinked"}</small>
+                </div>
+              ))}
+              {!worldEvents.length && <p className="muted">No ingested live events yet.</p>}
+            </div>
+          </div>
+          <div>
+            <h3>Forecasted next events</h3>
+            <div className="outlook-list">
+              {(liveOutlook?.future_events ?? []).slice(0, 6).map((item, index) => (
+                <div key={`${item.parent_crisis_id}-${item.event_type}-${index}`}>
+                  <strong>{item.event_type}</strong>
+                  <span>{pct(item.probability)} · {item.horizon_ticks} tick horizon</span>
+                </div>
+              ))}
+              {!liveOutlook?.future_events.length && <p className="muted">No crisis-branch forecast yet.</p>}
+            </div>
+          </div>
+          <div>
+            <h3>Expected actor steps</h3>
+            <div className="outlook-list">
+              {(liveOutlook?.next_actor_steps ?? []).slice(0, 6).map((item) => (
+                <div key={item.actor_id}>
+                  <strong>{item.actor_id} → {item.action}</strong>
+                  <span>{pct(item.confidence)} · {item.target_actor_id ?? "self/system"}</span>
+                </div>
+              ))}
+              {!liveOutlook?.next_actor_steps.length && <p className="muted">No live actor forecast yet.</p>}
+            </div>
+          </div>
+        </div>
+        {liveStatus?.last_error && <p className="live-error">{liveStatus.last_error}</p>}
       </section>
 
       <section className="intel-grid">
