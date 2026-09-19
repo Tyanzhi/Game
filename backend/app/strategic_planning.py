@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import random
-from copy import deepcopy
 
 
 ACTIONS = (
@@ -261,4 +260,107 @@ def plan_actor(
             ) * 1.7
             - uncertainty * 0.15
         ),
+    }
+
+
+def plan_multi_horizon(
+    actor_id: str,
+    options: list[dict],
+    actor_state: dict,
+    belief: dict,
+    metadata: dict,
+    seed: int,
+    horizons: tuple[int, ...] = (3, 8, 20),
+    samples: int = 48,
+) -> dict:
+    """Aggregate short-, medium-, and long-horizon Monte Carlo plans."""
+    if not options:
+        return {
+            "actor_id": actor_id,
+            "selected_action": "observe",
+            "horizons": [],
+            "aggregate": [],
+            "counterfactuals": [],
+            "planning_confidence": 0.0,
+        }
+
+    horizon_plans = [
+        plan_actor(
+            actor_id,
+            options,
+            actor_state,
+            belief,
+            metadata,
+            seed + horizon,
+            horizon=horizon,
+            samples=samples,
+        )
+        for horizon in horizons
+    ]
+
+    by_action: dict[str, dict] = {}
+    horizon_weights = {3: 0.45, 8: 0.35, 20: 0.20}
+    default_weight = 1.0 / max(1, len(horizons))
+
+    for plan in horizon_plans:
+        weight = horizon_weights.get(int(plan["horizon"]), default_weight)
+        for scenario in plan["scenarios"]:
+            row = by_action.setdefault(
+                scenario["action"],
+                {
+                    "action": scenario["action"],
+                    "weighted_score": 0.0,
+                    "weighted_mean": 0.0,
+                    "weighted_variance": 0.0,
+                    "weight": 0.0,
+                    "horizons": {},
+                },
+            )
+            row["weighted_score"] += float(scenario["planning_score"]) * weight
+            row["weighted_mean"] += float(scenario["mean_utility"]) * weight
+            row["weighted_variance"] += float(scenario["variance"]) * weight
+            row["weight"] += weight
+            row["horizons"][str(plan["horizon"])] = dict(scenario)
+
+    aggregate = []
+    for row in by_action.values():
+        weight = row.pop("weight") or 1.0
+        row["planning_score"] = row.pop("weighted_score") / weight
+        row["mean_utility"] = row.pop("weighted_mean") / weight
+        row["variance"] = row.pop("weighted_variance") / weight
+        aggregate.append(row)
+
+    aggregate.sort(key=lambda item: (-item["planning_score"], item["action"]))
+    baseline = aggregate[0]
+    counterfactuals = [
+        evaluate_counterfactual(
+            {
+                "action": baseline["action"],
+                "mean_utility": baseline["mean_utility"],
+                "variance": baseline["variance"],
+            },
+            {
+                "action": alternative["action"],
+                "mean_utility": alternative["mean_utility"],
+                "variance": alternative["variance"],
+            },
+            risk_aversion=1.0 - clamp(actor_state.get("risk_tolerance", 0.5)),
+        ).__dict__
+        for alternative in aggregate[1:]
+    ]
+
+    score_gap = (
+        baseline["planning_score"] - aggregate[1]["planning_score"]
+        if len(aggregate) > 1 else 0.0
+    )
+    uncertainty = clamp(belief.get("uncertainty", 0.5))
+
+    return {
+        "actor_id": actor_id,
+        "selected_action": baseline["action"],
+        "horizons": list(horizons),
+        "horizon_plans": horizon_plans,
+        "aggregate": aggregate,
+        "counterfactuals": counterfactuals,
+        "planning_confidence": clamp(0.45 + score_gap * 1.8 - uncertainty * 0.12),
     }
