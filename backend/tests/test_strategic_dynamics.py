@@ -1,6 +1,7 @@
 from app.strategic_dynamics import (
     bayesian_update,
     build_coalitions,
+    build_multilateral_coalitions,
     get_belief,
     nash_bargain,
     pop_due_effects,
@@ -90,3 +91,28 @@ def test_forecast_calibration_accumulates_brier_score():
     assert first["count"] == 2
     assert second["count"] == 2
     assert 0.0 <= second["mean_brier"] <= 1.0
+
+
+def test_multilateral_coalition_merges_connected_members():
+    actors = {"A": {}, "B": {}, "C": {}}
+    relationships = {
+        "A:B": {"diplomatic": 0.6, "economic": 0.6},
+        "B:A": {"diplomatic": 0.6, "economic": 0.6},
+        "B:C": {"diplomatic": 0.6, "economic": 0.6},
+        "C:B": {"diplomatic": 0.6, "economic": 0.6},
+        "A:C": {"diplomatic": 0.4, "economic": 0.5},
+        "C:A": {"diplomatic": 0.4, "economic": 0.5},
+    }
+    crisis_graph = {
+        "nodes": {
+            "c1": {
+                "phase": "escalating",
+                "participants": ["A", "B", "C"],
+            }
+        }
+    }
+    groups = build_multilateral_coalitions(actors, relationships, crisis_graph)
+    assert groups
+    assert groups[0]["size"] == 3
+    assert set(groups[0]["members"]) == {"A", "B", "C"}
+    assert groups[0]["cohesion"] > 0.0
