@@ -10,6 +10,12 @@ export type Actor = {
   information_quality?: number;
   energy_security?: number;
   trade_resilience?: number;
+  geography?: {
+    latitude: number;
+    longitude: number;
+    region: string;
+    source: string;
+  };
 };
 
 export type Simulation = {
@@ -85,6 +91,62 @@ export type StrategicOverview = {
   forecast_model?: string | null;
 };
 
+
+export type ActorDetail = {
+  simulation_id: string;
+  actor: Actor & Record<string, unknown>;
+  relationships: Relationship[];
+  active_crises: Array<Record<string, unknown>>;
+  latest_decisions: Array<Record<string, unknown>>;
+  beliefs: Record<string, unknown>;
+  strategic_memory: Record<string, unknown>;
+};
+
+export type CrisisDetail = {
+  simulation_id: string;
+  crisis_id: string;
+  crisis: Record<string, unknown>;
+  participants: Array<Actor & Record<string, unknown>>;
+  edges: Array<Record<string, unknown>>;
+  history: Array<Record<string, unknown>>;
+};
+
+export type ScenarioTree = {
+  actor_id: string;
+  depth: number;
+  branching: number;
+  leaf_count: number;
+  expected_stability: number;
+  escalation_probability: number;
+  nodes: Array<{
+    node_id: string;
+    depth: number;
+    probability: number;
+    stability: number;
+    market_stress: number;
+    crisis_intensity: number;
+    label: string;
+    parent_id?: string | null;
+  }>;
+};
+
+export type CausalChain = {
+  simulation_id: string;
+  effect_count: number;
+  nodes: Array<Record<string, unknown>>;
+  edges: Array<Record<string, unknown>>;
+};
+
+export type PlayerActionResult = {
+  simulation_id: string;
+  tick: number;
+  decision_id: string;
+  action_id: string;
+  actor_id: string;
+  status: string;
+  effects: Record<string, unknown>;
+};
+
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -105,6 +167,34 @@ export const api = {
   strategicOverview: (simulationId: string) =>
     request<StrategicOverview>(
       `/api/simulations/${encodeURIComponent(simulationId)}/strategic-overview`
+    ),
+  actorDetail: (simulationId: string, actorId: string) =>
+    request<ActorDetail>(
+      `/api/simulations/${encodeURIComponent(simulationId)}/actors/${encodeURIComponent(actorId)}`
+    ),
+  crisisDetail: (simulationId: string, crisisId: string) =>
+    request<CrisisDetail>(
+      `/api/simulations/${encodeURIComponent(simulationId)}/crises/${encodeURIComponent(crisisId)}`
+    ),
+  scenarioTree: (simulationId: string, actorId: string, depth = 3, branching = 3) =>
+    request<ScenarioTree>(
+      `/api/simulations/${encodeURIComponent(simulationId)}/scenario-tree/${encodeURIComponent(actorId)}?depth=${depth}&branching=${branching}`
+    ),
+  causalChain: (simulationId: string, limit = 120) =>
+    request<CausalChain>(
+      `/api/simulations/${encodeURIComponent(simulationId)}/causal-chain?limit=${limit}`
+    ),
+  playerAction: (
+    simulationId: string,
+    payload: { actor_id: string; action_type: string; target_actor_id?: string; rationale?: string }
+  ) =>
+    request<PlayerActionResult>(
+      `/api/simulations/${encodeURIComponent(simulationId)}/player-actions`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }
     ),
   runSimulation: (ticks: number, seed: number) =>
     request<{ simulation_id: string; ticks: number }>(
