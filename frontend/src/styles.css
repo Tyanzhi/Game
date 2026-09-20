@@ -654,3 +654,29 @@ input,select { width:100%; color:#e6f0ff; background:#07111e; border:1px solid #
   .alert-kpis { grid-template-columns:1fr 1fr; }
   .alert-queue { grid-template-columns:1fr; }
 }
+
+
+/* Stage 7 Operations runbooks */
+.ops-runbook {
+  display:grid;
+  grid-template-columns:auto 1fr;
+  gap:7px;
+  align-items:start;
+  margin-top:9px;
+  padding:8px 9px;
+  border:1px solid #17314f;
+  border-radius:8px;
+  background:rgba(47,104,170,.08);
+}
+.ops-runbook span {
+  color:#63dfc2;
+  font-size:.55rem;
+  font-weight:900;
+  letter-spacing:.08em;
+}
+.ops-runbook strong {
+  color:#a9bed8;
+  font-size:.63rem;
+  line-height:1.45;
+  font-weight:700;
+}
