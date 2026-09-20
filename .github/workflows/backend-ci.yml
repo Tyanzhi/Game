@@ -113,3 +113,39 @@ jobs:
         env:
           POSTGRES_PASSWORD: test_password
         run: docker compose -f docker-compose.prod.yml down -v
+
+
+  public-production-smoke:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [backend-tests, frontend-build, production-runtime]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install WebSocket smoke dependency
+        run: pip install websockets==15.0.1
+      - name: Verify public Railway HTTP endpoints
+        run: |
+          curl --fail --silent --show-error https://api-production-4632.up.railway.app/health/ready
+          curl --fail --silent --show-error https://api-production-4632.up.railway.app/api/live-intelligence/status
+          curl --fail --silent --show-error https://api-production-4632.up.railway.app/api/live-intelligence/outlook
+          curl --fail --silent --show-error https://api-production-4632.up.railway.app/api/live-intelligence/prediction-center
+          curl --fail --silent --show-error https://api-production-4632.up.railway.app/api/live-intelligence/operations-center
+      - name: Verify public Railway WebSocket
+        run: |
+          python - <<'PY'
+          import asyncio
+          import json
+          import websockets
+
+          async def main():
+              uri = "wss://api-production-4632.up.railway.app/ws/simulation/live-world"
+              async with websockets.connect(uri, open_timeout=20) as ws:
+                  payload = json.loads(await asyncio.wait_for(ws.recv(), timeout=20))
+                  assert payload.get("type") == "connected", payload
+                  assert payload.get("simulation_id") == "live-world", payload
+                  print(payload)
+
+          asyncio.run(main())
+          PY
