@@ -50,6 +50,7 @@ def _strategic_posture(
     own_crisis: float,
     target_crisis: float,
     risk_tolerance: float,
+    domestic_pressure: float = 0.0,
 ) -> str:
     if action == "observe":
         return "information_gathering"
@@ -59,6 +60,13 @@ def _strategic_posture(
         theory.get("liberalism", 0.0) + theory.get("constructivism", 0.0)
     ) / 2 >= 0.48:
         return "cooperative_mediation"
+    if (
+        domestic_pressure >= 0.62
+        and own_crisis < 0.55
+        and risk_tolerance >= 0.45
+        and action in {"public_statement", "defensive_posture"}
+    ):
+        return "diversion"
     if (
         target_crisis >= 0.55
         and own_crisis < 0.40
@@ -289,6 +297,7 @@ async def decide_all(
             float(selected.get("crisis_intensity", 0.0)),
             target_crisis,
             float(actor.risk_tolerance),
+            float(actor.domestic_pressure),
         )
         scenario_tree = build_scenario_tree(
             actor.id,
