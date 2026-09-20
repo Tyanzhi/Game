@@ -186,3 +186,18 @@ class WorldStateVersionModel(Base):
     state_json: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     __table_args__ = (UniqueConstraint('simulation_id', 'tick', name='uq_world_state_version'),)
+
+
+class AlertStateModel(Base):
+    __tablename__ = 'alert_states'
+    alert_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    simulation_id: Mapped[str] = mapped_column(String(100), index=True)
+    status: Mapped[str] = mapped_column(String(30), default='open', index=True)
+    acknowledged_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    note: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
