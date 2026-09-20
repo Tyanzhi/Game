@@ -8,6 +8,7 @@ import {
   LiveIntelligenceStatus,
   LiveOutlook,
   LiveWorldEvent,
+  OperationsCenter,
   PredictionCenter,
   Relationship,
   ScenarioTree,
@@ -195,6 +196,152 @@ function CausalPanel({ chain }: { chain: CausalChain | null }) {
       ))}
       {!effects.length && <p className="muted">No causal effects recorded yet.</p>}
     </div>
+  );
+}
+
+
+function OperationsCenterPanel({
+  center,
+  busyAlertId,
+  onToggleAlert,
+  onActor,
+  onCrisis
+}: {
+  center: OperationsCenter | null;
+  busyAlertId: string;
+  onToggleAlert: (alertId: string, nextStatus: "open" | "acknowledged") => void;
+  onActor: (actorId: string) => void;
+  onCrisis: (crisisId: string) => void;
+}) {
+  if (!center) {
+    return (
+      <section className="operations-center panel">
+        <p className="eyebrow">ALERT & OPERATIONS CENTER</p>
+        <p className="muted">Operational alerts will appear after a simulation snapshot exists.</p>
+      </section>
+    );
+  }
+
+  const openAlerts = center.alerts.filter((item) => item.status !== "acknowledged");
+  const acknowledged = center.alerts.filter((item) => item.status === "acknowledged");
+
+  return (
+    <section className="operations-center panel">
+      <div className="panel__heading operations-heading">
+        <div>
+          <p className="eyebrow">ALERT & OPERATIONS CENTER</p>
+          <h2>Operational picture · tick {center.tick}</h2>
+        </div>
+        <div className={`posture posture--${center.posture}`}>
+          <span /> {center.posture}
+        </div>
+      </div>
+
+      <div className="alert-kpis">
+        <div><span>critical</span><strong>{center.summary.critical}</strong></div>
+        <div><span>high</span><strong>{center.summary.high}</strong></div>
+        <div><span>open</span><strong>{center.summary.open}</strong></div>
+        <div><span>acknowledged</span><strong>{center.summary.acknowledged}</strong></div>
+      </div>
+
+      <div className="operations-grid">
+        <div>
+          <div className="operations-subhead">
+            <h3>Active alert queue</h3>
+            <span>{openAlerts.length} requiring attention</span>
+          </div>
+          <div className="alert-queue">
+            {openAlerts.slice(0, 12).map((item) => (
+              <article key={item.id} className={`ops-alert ops-alert--${item.severity}`}>
+                <div className="ops-alert__top">
+                  <div>
+                    <span className="severity-chip">{item.severity}</span>
+                    <small>{item.kind}</small>
+                  </div>
+                  <strong>{pct(item.score)}</strong>
+                </div>
+                <h3>{item.title}</h3>
+                <p>{item.message}</p>
+                <div className="ops-alert__links">
+                  {item.actor_ids.map((actorId) => (
+                    <button type="button" key={actorId} onClick={() => onActor(actorId)}>
+                      actor:{actorId}
+                    </button>
+                  ))}
+                  {item.crisis_id && (
+                    <button type="button" onClick={() => onCrisis(item.crisis_id!)}>
+                      crisis:{item.crisis_id}
+                    </button>
+                  )}
+                </div>
+                <button
+                  className="ack-button"
+                  type="button"
+                  disabled={busyAlertId === item.id}
+                  onClick={() => onToggleAlert(item.id, "acknowledged")}
+                >
+                  {busyAlertId === item.id ? "UPDATING…" : "ACKNOWLEDGE"}
+                </button>
+              </article>
+            ))}
+            {!openAlerts.length && <p className="muted">No open operational alerts.</p>}
+          </div>
+        </div>
+
+        <aside className="operations-brief">
+          <p className="eyebrow">OPERATIONS BRIEF</p>
+          <h3>{center.brief.headline}</h3>
+          <div className="brief-section">
+            <span>Top priorities</span>
+            {center.brief.top_priorities.map((item) => (
+              <div key={item.id}>
+                <b className={`brief-severity brief-severity--${item.severity}`} />
+                <strong>{item.title}</strong>
+              </div>
+            ))}
+            {!center.brief.top_priorities.length && <small>No active priorities.</small>}
+          </div>
+          <div className="brief-section">
+            <span>Watch actors</span>
+            <div className="watch-buttons">
+              {center.brief.watch_actors.map((actorId) => (
+                <button type="button" key={actorId} onClick={() => onActor(actorId)}>
+                  {actorId}
+                </button>
+              ))}
+              {!center.brief.watch_actors.length && <small>—</small>}
+            </div>
+          </div>
+          <div className="brief-section">
+            <span>Watch crises</span>
+            <div className="watch-buttons">
+              {center.brief.watch_crises.map((crisisId) => (
+                <button type="button" key={crisisId} onClick={() => onCrisis(crisisId)}>
+                  {crisisId}
+                </button>
+              ))}
+              {!center.brief.watch_crises.length && <small>—</small>}
+            </div>
+          </div>
+
+          {acknowledged.length > 0 && (
+            <div className="brief-section acknowledged-list">
+              <span>Acknowledged</span>
+              {acknowledged.slice(0, 5).map((item) => (
+                <button
+                  type="button"
+                  key={item.id}
+                  disabled={busyAlertId === item.id}
+                  onClick={() => onToggleAlert(item.id, "open")}
+                >
+                  REOPEN · {item.title}
+                </button>
+              ))}
+            </div>
+          )}
+        </aside>
+      </div>
+    </section>
   );
 }
 
@@ -396,6 +543,8 @@ export default function App() {
   const [worldEvents, setWorldEvents] = useState<LiveWorldEvent[]>([]);
   const [liveOutlook, setLiveOutlook] = useState<LiveOutlook | null>(null);
   const [predictionCenter, setPredictionCenter] = useState<PredictionCenter | null>(null);
+  const [operationsCenter, setOperationsCenter] = useState<OperationsCenter | null>(null);
+  const [busyAlertId, setBusyAlertId] = useState("");
   const [predictionHorizon, setPredictionHorizon] = useState(7);
   const [liveBusy, setLiveBusy] = useState(false);
 
@@ -424,16 +573,18 @@ export default function App() {
   }
 
   async function refreshSimulation(simulationId: string) {
-    const [tickRows, strategic, chain, predictions] = await Promise.all([
+    const [tickRows, strategic, chain, predictions, operations] = await Promise.all([
       api.ticks(simulationId),
       api.strategicOverview(simulationId),
       api.causalChain(simulationId, 160),
-      api.predictionCenter(simulationId)
+      api.predictionCenter(simulationId),
+      api.operationsCenter(simulationId)
     ]);
     setTicks(tickRows);
     setOverview(strategic);
     setCausalChain(chain);
     setPredictionCenter(predictions);
+    setOperationsCenter(operations);
     if (!selectedActor && strategic.actors[0]) setSelectedActor(strategic.actors[0].id);
   }
 
@@ -546,6 +697,26 @@ export default function App() {
     }
   }
 
+  async function toggleAlert(
+    alertId: string,
+    nextStatus: "open" | "acknowledged"
+  ) {
+    if (!selectedSimulation) return;
+    setBusyAlertId(alertId);
+    setError("");
+    try {
+      await api.setAlertState(selectedSimulation, alertId, {
+        status: nextStatus,
+        acknowledged_by: nextStatus === "acknowledged" ? "stage7-operator" : undefined
+      });
+      setOperationsCenter(await api.operationsCenter(selectedSimulation));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Alert update failed");
+    } finally {
+      setBusyAlertId("");
+    }
+  }
+
   async function syncLiveNow() {
     setLiveBusy(true);
     setError("");
@@ -600,6 +771,14 @@ export default function App() {
           <div><span>EFFECTS</span><strong>{causalChain?.effect_count ?? 0}</strong></div>
         </article>
       </section>
+
+      <OperationsCenterPanel
+        center={operationsCenter}
+        busyAlertId={busyAlertId}
+        onToggleAlert={toggleAlert}
+        onActor={setSelectedActor}
+        onCrisis={setSelectedCrisis}
+      />
 
       <section className="world-layout">
         <article className="panel map-panel">
