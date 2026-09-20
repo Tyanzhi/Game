@@ -224,6 +224,7 @@ export type OperationsAlert = {
   actor_ids: string[];
   crisis_id?: string | null;
   metrics: Record<string, unknown>;
+  operator_action: string;
   status: "open" | "acknowledged";
   acknowledged_by?: string | null;
   acknowledged_at?: string | null;
@@ -247,6 +248,7 @@ export type OperationsCenter = {
   brief: {
     headline: string;
     top_priorities: Array<{ id: string; title: string; severity: string }>;
+    recommended_actions: Array<{ alert_id: string; severity: string; action: string }>;
     watch_actors: string[];
     watch_crises: string[];
     forecast_calibration: Record<string, unknown>;
