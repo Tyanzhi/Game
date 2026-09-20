@@ -83,6 +83,10 @@ async def test_operations_center_builds_and_acknowledges_alerts():
         assert "c1" in center["brief"]["watch_crises"]
 
         alert = center["alerts"][0]
+        assert alert["operator_action"]
+        assert center["brief"]["recommended_actions"]
+        assert center["brief"]["recommended_actions"][0]["action"]
+
         result = await set_alert_state(
             session,
             "sim-ops",
