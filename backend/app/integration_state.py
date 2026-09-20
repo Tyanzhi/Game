@@ -4,6 +4,11 @@ from dataclasses import dataclass, field
 from sqlalchemy import select
 from .models import ActorModel, RelationshipModel, SimulationTickModel, WorldStateVersionModel
 
+RELATIONSHIP_FIELDS = (
+    'diplomatic', 'economic', 'military', 'trade',
+    'energy', 'technology', 'political', 'information',
+)
+
 TRACKED_FIELDS = (
     'stability', 'economic_capacity', 'diplomatic_capacity', 'security_capacity',
     'domestic_pressure', 'risk_tolerance', 'strategic_patience',
@@ -76,9 +81,8 @@ async def load_world_state(session, simulation_id, tick=0, seed=0):
     })
     db_relationships = {
         f'{rel.source_actor_id}:{rel.target_actor_id}': {
-            'diplomatic': float(rel.diplomatic or 0.0),
-            'economic': float(rel.economic or 0.0),
-            'military': float(rel.military or 0.0),
+            field: float(getattr(rel, field, 0.0) or 0.0)
+            for field in RELATIONSHIP_FIELDS
         }
         for rel in relationships
     }
@@ -97,10 +101,25 @@ async def sync_world_state_to_db(session, state):
                 setattr(row, field, max(0.0, min(1.0, float(value))))
 
     relationships = (await session.execute(select(RelationshipModel))).scalars().all()
-    for rel in relationships:
-        key = f"{rel.source_actor_id}:{rel.target_actor_id}"
-        values = state.metadata.get("relationships", {}).get(key, {})
-        for field in ("diplomatic", "economic", "military"):
+    by_key = {
+        f"{rel.source_actor_id}:{rel.target_actor_id}": rel
+        for rel in relationships
+    }
+    for key, values in state.metadata.get("relationships", {}).items():
+        if ":" not in key or not isinstance(values, dict):
+            continue
+        source_actor_id, target_actor_id = key.split(":", 1)
+        rel = by_key.get(key)
+        if rel is None:
+            if source_actor_id not in state.actors or target_actor_id not in state.actors:
+                continue
+            rel = RelationshipModel(
+                source_actor_id=source_actor_id,
+                target_actor_id=target_actor_id,
+            )
+            session.add(rel)
+            by_key[key] = rel
+        for field in RELATIONSHIP_FIELDS:
             if field in values:
                 setattr(rel, field, max(-1.0, min(1.0, float(values[field]))))
 
