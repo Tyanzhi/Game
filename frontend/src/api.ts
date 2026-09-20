@@ -213,6 +213,47 @@ export type LiveOutlook = {
 };
 
 
+export type OperationsAlert = {
+  id: string;
+  kind: string;
+  subject: string;
+  title: string;
+  message: string;
+  score: number;
+  severity: "critical" | "high" | "medium" | "low";
+  actor_ids: string[];
+  crisis_id?: string | null;
+  metrics: Record<string, unknown>;
+  status: "open" | "acknowledged";
+  acknowledged_by?: string | null;
+  acknowledged_at?: string | null;
+  note?: string | null;
+};
+
+export type OperationsCenter = {
+  simulation_id: string;
+  tick: number;
+  posture: string;
+  summary: {
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+    open: number;
+    acknowledged: number;
+    total: number;
+  };
+  alerts: OperationsAlert[];
+  brief: {
+    headline: string;
+    top_priorities: Array<{ id: string; title: string; severity: string }>;
+    watch_actors: string[];
+    watch_crises: string[];
+    forecast_calibration: Record<string, unknown>;
+    generated_from_tick: number;
+  };
+};
+
 export type PredictionCenter = {
   simulation_id: string;
   tick: number;
@@ -347,6 +388,59 @@ export const api = {
     request<PredictionCenter>(
       `/api/simulations/${encodeURIComponent(simulationId)}/prediction-center`
     ),
+  operationsCenter: (simulationId: string) =>
+    request<OperationsCenter>(
+      `/api/simulations/${encodeURIComponent(simulationId)}/operations-center`
+    ),
+  setAlertState: (
+    simulationId: string,
+    alertId: string,
+    payload: {
+      status: "open" | "acknowledged";
+      acknowledged_by?: string;
+      note?: string;
+    }
+  ) =>
+    request<{
+      alert_id: string;
+      simulation_id: string;
+      status: string;
+      acknowledged_by?: string | null;
+      acknowledged_at?: string | null;
+      note?: string | null;
+    }>(
+      `/api/simulations/${encodeURIComponent(simulationId)}/alerts/${encodeURIComponent(alertId)}/state`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }
+    ),
+  liveOperationsCenter: () =>
+    request<OperationsCenter | {
+      simulation_id: null;
+      status: string;
+      tick: number;
+      posture: string;
+      summary: {
+        critical: number;
+        high: number;
+        medium: number;
+        low: number;
+        open: number;
+        acknowledged: number;
+        total: number;
+      };
+      alerts: [];
+      brief: {
+        headline: string;
+        top_priorities: [];
+        watch_actors: [];
+        watch_crises: [];
+        forecast_calibration: Record<string, unknown>;
+        generated_from_tick: number;
+      };
+    }>("/api/live-intelligence/operations-center"),
   livePredictionCenter: () =>
     request<PredictionCenter | {
       simulation_id: null;
