@@ -45,7 +45,7 @@ _allowed_origins = [
     item.strip()
     for item in os.getenv(
         'CORS_ALLOWED_ORIGINS',
-        'http://localhost:5173,https://geopolitica20261.netlify.app',
+        'http://localhost:5173,https://geopolitica20261.netlify.app,https://world-engine-07x9.netlify.app',
     ).split(',')
     if item.strip()
 ]
@@ -365,7 +365,8 @@ async def simulation_alert_state(
 
 @app.get('/api/live-intelligence/operations-center')
 async def live_operations_center(db: AsyncSession = Depends(get_db)):
-    simulation_id = live_state.last_simulation_id
+    state = await get_live_state_snapshot()
+    simulation_id = state.get('last_simulation_id')
     if not simulation_id:
         return {
             'simulation_id': None,
