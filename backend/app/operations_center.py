@@ -90,11 +90,20 @@ async def build_operations_center(
         escalation = _clamp(node.get("escalation", 0.0))
         contagion = _clamp(node.get("contagion", 0.0))
         uncertainty = _clamp(node.get("uncertainty", 0.0))
+        phase = str(node.get("phase") or "unknown")
+        phase_risk = {
+            "emerging": 0.03,
+            "escalating": 0.10,
+            "peak": 0.16,
+            "contained": -0.05,
+            "decaying": -0.10,
+        }.get(phase, 0.0)
         score = _clamp(
             intensity * 0.52
             + escalation * 0.22
             + contagion * 0.16
             + uncertainty * 0.10
+            + phase_risk
         )
         alerts.append(_alert(
             simulation_id,
