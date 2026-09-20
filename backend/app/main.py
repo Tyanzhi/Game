@@ -24,6 +24,7 @@ from .live_intelligence import (
 )
 from .live_outlook import build_live_outlook
 from .prediction_center import build_prediction_center
+from .operations_center import build_operations_center, set_alert_state
 from .runtime_bus import runtime_bus
 from .strategic_gameplay import (
     actor_detail,
@@ -326,6 +327,71 @@ async def simulation_prediction_center(
         return await build_prediction_center(db, simulation_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get('/api/simulations/{simulation_id}/operations-center')
+async def simulation_operations_center(
+    simulation_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await build_operations_center(db, simulation_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post('/api/simulations/{simulation_id}/alerts/{alert_id}/state')
+async def simulation_alert_state(
+    simulation_id: str,
+    alert_id: str,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await set_alert_state(
+            db,
+            simulation_id,
+            alert_id,
+            status=str(payload.get('status') or 'acknowledged'),
+            acknowledged_by=(
+                str(payload.get('acknowledged_by'))
+                if payload.get('acknowledged_by') else None
+            ),
+            note=str(payload.get('note')) if payload.get('note') else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get('/api/live-intelligence/operations-center')
+async def live_operations_center(db: AsyncSession = Depends(get_db)):
+    simulation_id = live_state.last_simulation_id
+    if not simulation_id:
+        return {
+            'simulation_id': None,
+            'status': 'no_live_simulation',
+            'tick': 0,
+            'posture': 'normal',
+            'summary': {
+                'critical': 0,
+                'high': 0,
+                'medium': 0,
+                'low': 0,
+                'open': 0,
+                'acknowledged': 0,
+                'total': 0,
+            },
+            'alerts': [],
+            'brief': {
+                'headline': 'No live simulation is available yet.',
+                'top_priorities': [],
+                'watch_actors': [],
+                'watch_crises': [],
+                'forecast_calibration': {},
+                'generated_from_tick': 0,
+            },
+        }
+    return await build_operations_center(db, simulation_id)
 
 @app.post('/api/live-intelligence/run-now')
 async def live_intelligence_run_now():
