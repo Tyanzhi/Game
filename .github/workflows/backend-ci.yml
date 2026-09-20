@@ -127,11 +127,27 @@ jobs:
         run: pip install websockets==15.0.1
       - name: Verify public Railway HTTP endpoints
         run: |
-          curl --fail --silent --show-error https://api-production-4632.up.railway.app/health/ready
-          curl --fail --silent --show-error https://api-production-4632.up.railway.app/api/live-intelligence/status
-          curl --fail --silent --show-error https://api-production-4632.up.railway.app/api/live-intelligence/outlook
-          curl --fail --silent --show-error https://api-production-4632.up.railway.app/api/live-intelligence/prediction-center
-          curl --fail --silent --show-error https://api-production-4632.up.railway.app/api/live-intelligence/operations-center
+          set -euo pipefail
+
+          retry_endpoint() {
+            url="$1"
+            for attempt in $(seq 1 20); do
+              if curl --fail --silent --show-error "$url"; then
+                echo
+                return 0
+              fi
+              echo "Railway endpoint not ready yet (attempt $attempt): $url"
+              sleep 15
+            done
+            echo "Railway endpoint did not become ready: $url"
+            return 1
+          }
+
+          retry_endpoint https://api-production-4632.up.railway.app/health/ready
+          retry_endpoint https://api-production-4632.up.railway.app/api/live-intelligence/status
+          retry_endpoint https://api-production-4632.up.railway.app/api/live-intelligence/outlook
+          retry_endpoint https://api-production-4632.up.railway.app/api/live-intelligence/prediction-center
+          retry_endpoint https://api-production-4632.up.railway.app/api/live-intelligence/operations-center
       - name: Verify public Railway WebSocket
         run: |
           python - <<'PY'
