@@ -33,6 +33,15 @@ def _severity(score: float) -> str:
     return "low"
 
 
+def _operator_action(kind: str) -> str:
+    return {
+        "crisis": "Open crisis detail and compare escalation vs stabilization scenarios.",
+        "market": "Review market drivers and inspect actors with the highest exposure.",
+        "actor": "Inspect actor detail, relationships and the 1/7/30-tick scenario tree.",
+        "forecast": "Review calibration, uncertainty and the evidence feeding this forecast.",
+    }.get(kind, "Review the underlying evidence and causal chain.")
+
+
 def _alert(
     simulation_id: str,
     *,
@@ -56,6 +65,7 @@ def _alert(
         "actor_ids": actor_ids or [],
         "crisis_id": crisis_id,
         "metrics": metrics or {},
+        "operator_action": _operator_action(kind),
         "status": "open",
         "acknowledged_by": None,
         "acknowledged_at": None,
@@ -290,6 +300,14 @@ async def build_operations_center(
                     "id": item["id"],
                     "title": item["title"],
                     "severity": item["severity"],
+                }
+                for item in open_alerts[:5]
+            ],
+            "recommended_actions": [
+                {
+                    "alert_id": item["id"],
+                    "severity": item["severity"],
+                    "action": item["operator_action"],
                 }
                 for item in open_alerts[:5]
             ],
