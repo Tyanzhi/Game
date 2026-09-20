@@ -262,6 +262,10 @@ function OperationsCenterPanel({
                 </div>
                 <h3>{item.title}</h3>
                 <p>{item.message}</p>
+                <div className="ops-runbook">
+                  <span>NEXT</span>
+                  <strong>{item.operator_action}</strong>
+                </div>
                 <div className="ops-alert__links">
                   {item.actor_ids.map((actorId) => (
                     <button type="button" key={actorId} onClick={() => onActor(actorId)}>
@@ -300,6 +304,16 @@ function OperationsCenterPanel({
               </div>
             ))}
             {!center.brief.top_priorities.length && <small>No active priorities.</small>}
+          </div>
+          <div className="brief-section">
+            <span>Recommended operator actions</span>
+            {center.brief.recommended_actions.slice(0, 5).map((item) => (
+              <div key={item.alert_id}>
+                <b className={`brief-severity brief-severity--${item.severity}`} />
+                <strong>{item.action}</strong>
+              </div>
+            ))}
+            {!center.brief.recommended_actions.length && <small>No actions required.</small>}
           </div>
           <div className="brief-section">
             <span>Watch actors</span>
