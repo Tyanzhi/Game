@@ -40,13 +40,20 @@ async def fetch_news(query: str = "geopolitics", max_records: int = 25) -> list[
         if not title:
             continue
         result.append(RawEvent(
-            source_id="gdelt",
+            source_id=f"gdelt:{domain.lower() or 'unknown'}",
             source_url=url,
             title=title,
             description=title,
             timestamp=_timestamp(item.get("seendate")),
             event_type="news_report",
             confidence=0.55,
-            raw={"domain": domain, "language": item.get("language"), "sourcecountry": item.get("sourcecountry")},
+            source_quality=0.62 if domain else 0.52,
+            raw={
+                "domain": domain,
+                "provider": "gdelt",
+                "source_type": "news_aggregation",
+                "language": item.get("language"),
+                "sourcecountry": item.get("sourcecountry"),
+            },
         ))
     return result
