@@ -224,11 +224,46 @@ export type OperationsAlert = {
   actor_ids: string[];
   crisis_id?: string | null;
   metrics: Record<string, unknown>;
+  evidence: Array<{
+    type: string;
+    event_id?: string;
+    title?: string;
+    confidence?: number;
+    fact_status?: string;
+    source_count?: number;
+    source_urls?: string[];
+    source?: string;
+    actor_id?: string;
+    field?: string;
+    horizon?: number;
+    tick?: number;
+  }>;
   operator_action: string;
-  status: "open" | "acknowledged";
+  status: "open" | "acknowledged" | "resolved";
   acknowledged_by?: string | null;
   acknowledged_at?: string | null;
   note?: string | null;
+  first_seen_tick?: number | null;
+  last_seen_tick?: number | null;
+  occurrence_count?: number;
+  resolved_at?: string | null;
+};
+
+
+export type AlertHistoryItem = {
+  id: string;
+  simulation_id: string;
+  status: "open" | "acknowledged" | "resolved";
+  title: string;
+  severity: string;
+  first_seen_tick: number;
+  last_seen_tick: number;
+  occurrence_count: number;
+  acknowledged_by?: string | null;
+  acknowledged_at?: string | null;
+  resolved_at?: string | null;
+  note?: string | null;
+  updated_at?: string | null;
 };
 
 export type OperationsCenter = {
@@ -242,9 +277,11 @@ export type OperationsCenter = {
     low: number;
     open: number;
     acknowledged: number;
+    resolved_recent: number;
     total: number;
   };
   alerts: OperationsAlert[];
+  recent_resolved: AlertHistoryItem[];
   brief: {
     headline: string;
     top_priorities: Array<{ id: string; title: string; severity: string }>;
@@ -394,6 +431,27 @@ export const api = {
     request<OperationsCenter>(
       `/api/simulations/${encodeURIComponent(simulationId)}/operations-center`
     ),
+  alertHistory: (
+    simulationId: string,
+    status?: "open" | "acknowledged" | "resolved",
+    limit = 100
+  ) => {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (status) query.set("status", status);
+    return request<AlertHistoryItem[]>(
+      `/api/simulations/${encodeURIComponent(simulationId)}/alerts/history?${query.toString()}`
+    );
+  },
+  liveAlertHistory: (
+    status?: "open" | "acknowledged" | "resolved",
+    limit = 100
+  ) => {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (status) query.set("status", status);
+    return request<AlertHistoryItem[]>(
+      `/api/live-intelligence/alerts/history?${query.toString()}`
+    );
+  },
   setAlertState: (
     simulationId: string,
     alertId: string,
@@ -431,9 +489,11 @@ export const api = {
         low: number;
         open: number;
         acknowledged: number;
+        resolved_recent: number;
         total: number;
       };
       alerts: [];
+      recent_resolved: [];
       brief: {
         headline: string;
         top_priorities: [];
