@@ -123,6 +123,7 @@ async def _external_evidence(
 
     result: dict[str, list[dict]] = {}
     for event in events:
+        metadata = event.metadata_json if isinstance(event.metadata_json, dict) else {}
         result[event.id] = [{
             "type": "external_event",
             "event_id": event.id,
@@ -130,6 +131,13 @@ async def _external_evidence(
             "confidence": float(event.confidence),
             "fact_status": event.status,
             "source_count": int(event.source_count),
+            "independent_source_count": int(
+                metadata.get("independent_source_count", event.source_count)
+            ),
+            "source_quality_mean": float(
+                metadata.get("source_quality_mean", 0.0)
+            ),
+            "confidence_model": metadata.get("confidence_model"),
             "source_urls": urls_by_event.get(event.id, [])[:8],
         }]
     return result
