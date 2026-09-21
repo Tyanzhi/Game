@@ -38,6 +38,29 @@ async def _sleep_or_stop(stop_event: asyncio.Event, seconds: float) -> None:
         pass
 
 
+async def run_one_shot_worker(stop_event: asyncio.Event) -> None:
+    lease = max(
+        180,
+        int(os.getenv("LIVE_WORKER_LEASE_SECONDS", "240")),
+    )
+    token = f"{socket.gethostname()}:{uuid4().hex}"
+    leader = True
+    if runtime_bus.enabled:
+        leader = await runtime_bus.acquire_lock(_LEADER_KEY, token, lease)
+
+    if not leader or stop_event.is_set():
+        return
+
+    try:
+        await run_live_intelligence_cycle(broadcast=runtime_bus.publish)
+    finally:
+        if runtime_bus.enabled:
+            try:
+                await runtime_bus.release_lock(_LEADER_KEY, token)
+            except Exception:
+                pass
+
+
 async def run_leader_worker(
     stop_event: asyncio.Event,
     *,
@@ -137,7 +160,13 @@ async def run_worker() -> None:
 
     await wait_for_dependencies(stop_event)
     if not stop_event.is_set():
-        await run_leader_worker(stop_event)
+        one_shot = os.getenv("LIVE_WORKER_ONESHOT", "0").lower() in {
+            "1", "true", "yes"
+        }
+        if one_shot:
+            await run_one_shot_worker(stop_event)
+        else:
+            await run_leader_worker(stop_event)
     await runtime_bus.close()
 
 
