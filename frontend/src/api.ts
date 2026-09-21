@@ -170,6 +170,9 @@ export type LiveWorldEvent = {
   confidence: number;
   status: string;
   source_count: number;
+  independent_source_count?: number;
+  source_quality_mean?: number;
+  confidence_model?: string;
   actors: string[];
   source_urls: string[];
 };
