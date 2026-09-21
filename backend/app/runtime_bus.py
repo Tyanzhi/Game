@@ -28,6 +28,61 @@ class RuntimeBus:
             return
         await self._redis.publish(self.channel, json.dumps(payload, separators=(",", ":")))
 
+    async def acquire_lock(
+        self,
+        key: str,
+        token: str,
+        ttl_seconds: int,
+    ) -> bool:
+        if self._redis is None:
+            return True
+        return bool(
+            await self._redis.set(
+                key,
+                token,
+                nx=True,
+                ex=max(1, int(ttl_seconds)),
+            )
+        )
+
+    async def renew_lock(
+        self,
+        key: str,
+        token: str,
+        ttl_seconds: int,
+    ) -> bool:
+        if self._redis is None:
+            return True
+        result = await self._redis.eval(
+            """
+            if redis.call('get', KEYS[1]) == ARGV[1] then
+                return redis.call('expire', KEYS[1], ARGV[2])
+            end
+            return 0
+            """,
+            1,
+            key,
+            token,
+            max(1, int(ttl_seconds)),
+        )
+        return bool(result)
+
+    async def release_lock(self, key: str, token: str) -> bool:
+        if self._redis is None:
+            return True
+        result = await self._redis.eval(
+            """
+            if redis.call('get', KEYS[1]) == ARGV[1] then
+                return redis.call('del', KEYS[1])
+            end
+            return 0
+            """,
+            1,
+            key,
+            token,
+        )
+        return bool(result)
+
     async def set_json(self, key: str, payload: dict, ttl_seconds: int | None = None) -> None:
         if self._redis is None:
             return
