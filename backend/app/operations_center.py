@@ -2,11 +2,18 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from hashlib import sha256
+from urllib.parse import urlparse
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import AlertStateModel, ActorModel, WorldStateVersionModel
+from .models import (
+    AlertStateModel,
+    ActorModel,
+    EventModel,
+    EventSourceModel,
+    WorldStateVersionModel,
+)
 from .prediction_center import build_prediction_center
 
 
@@ -42,6 +49,15 @@ def _operator_action(kind: str) -> str:
     }.get(kind, "Review the underlying evidence and causal chain.")
 
 
+def _safe_http_url(value: str | None) -> str | None:
+    if not value:
+        return None
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    return value
+
+
 def _alert(
     simulation_id: str,
     *,
@@ -53,6 +69,7 @@ def _alert(
     actor_ids: list[str] | None = None,
     crisis_id: str | None = None,
     metrics: dict | None = None,
+    evidence: list[dict] | None = None,
 ) -> dict:
     return {
         "id": _alert_id(simulation_id, kind, subject),
@@ -65,12 +82,155 @@ def _alert(
         "actor_ids": actor_ids or [],
         "crisis_id": crisis_id,
         "metrics": metrics or {},
+        "evidence": evidence or [],
         "operator_action": _operator_action(kind),
         "status": "open",
         "acknowledged_by": None,
         "acknowledged_at": None,
         "note": None,
+        "first_seen_tick": None,
+        "last_seen_tick": None,
+        "occurrence_count": 1,
+        "resolved_at": None,
     }
+
+
+async def _external_evidence(
+    session: AsyncSession,
+    root_event_ids: set[str],
+) -> dict[str, list[dict]]:
+    if not root_event_ids:
+        return {}
+
+    events = (
+        await session.execute(
+            select(EventModel).where(EventModel.id.in_(root_event_ids))
+        )
+    ).scalars().all()
+    sources = (
+        await session.execute(
+            select(EventSourceModel).where(
+                EventSourceModel.event_id.in_(root_event_ids)
+            )
+        )
+    ).scalars().all()
+
+    urls_by_event: dict[str, list[str]] = {}
+    for source in sources:
+        url = _safe_http_url(source.source_url)
+        if url and url not in urls_by_event.setdefault(source.event_id, []):
+            urls_by_event[source.event_id].append(url)
+
+    result: dict[str, list[dict]] = {}
+    for event in events:
+        result[event.id] = [{
+            "type": "external_event",
+            "event_id": event.id,
+            "title": event.title,
+            "confidence": float(event.confidence),
+            "fact_status": event.status,
+            "source_count": int(event.source_count),
+            "source_urls": urls_by_event.get(event.id, [])[:8],
+        }]
+    return result
+
+
+async def _sync_alert_lifecycle(
+    session: AsyncSession,
+    simulation_id: str,
+    tick: int,
+    alerts: list[dict],
+) -> list[dict]:
+    now = datetime.now(timezone.utc)
+    existing = (
+        await session.execute(
+            select(AlertStateModel).where(
+                AlertStateModel.simulation_id == simulation_id
+            )
+        )
+    ).scalars().all()
+    by_id = {row.alert_id: row for row in existing}
+    active_ids = {item["id"] for item in alerts}
+
+    for item in alerts:
+        row = by_id.get(item["id"])
+        if row is None:
+            row = AlertStateModel(
+                alert_id=item["id"],
+                simulation_id=simulation_id,
+                status="open",
+                first_seen_tick=tick,
+                last_seen_tick=tick,
+                last_severity=item["severity"],
+                last_title=item["title"],
+                occurrence_count=1,
+                updated_at=now,
+            )
+            session.add(row)
+            by_id[row.alert_id] = row
+        else:
+            if row.status == "resolved":
+                row.status = "open"
+                row.acknowledged_by = None
+                row.acknowledged_at = None
+                row.note = None
+                row.resolved_at = None
+                row.occurrence_count = int(row.occurrence_count or 1) + 1
+            row.last_seen_tick = tick
+            row.last_severity = item["severity"]
+            row.last_title = item["title"]
+            row.updated_at = now
+
+        item["status"] = row.status
+        item["acknowledged_by"] = row.acknowledged_by
+        item["acknowledged_at"] = (
+            row.acknowledged_at.isoformat() if row.acknowledged_at else None
+        )
+        item["note"] = row.note
+        item["first_seen_tick"] = int(row.first_seen_tick or tick)
+        item["last_seen_tick"] = int(row.last_seen_tick or tick)
+        item["occurrence_count"] = int(row.occurrence_count or 1)
+        item["resolved_at"] = (
+            row.resolved_at.isoformat() if row.resolved_at else None
+        )
+
+    for row in existing:
+        if row.alert_id in active_ids or row.status == "resolved":
+            continue
+        row.status = "resolved"
+        row.resolved_at = now
+        row.updated_at = now
+
+    await session.commit()
+
+    resolved = sorted(
+        (
+            row for row in by_id.values()
+            if row.status == "resolved"
+        ),
+        key=lambda row: row.resolved_at or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+    return [
+        {
+            "id": row.alert_id,
+            "title": row.last_title or row.alert_id,
+            "severity": row.last_severity or "low",
+            "status": row.status,
+            "first_seen_tick": int(row.first_seen_tick or 0),
+            "last_seen_tick": int(row.last_seen_tick or 0),
+            "occurrence_count": int(row.occurrence_count or 1),
+            "acknowledged_by": row.acknowledged_by,
+            "acknowledged_at": (
+                row.acknowledged_at.isoformat() if row.acknowledged_at else None
+            ),
+            "resolved_at": (
+                row.resolved_at.isoformat() if row.resolved_at else None
+            ),
+            "note": row.note,
+        }
+        for row in resolved[:20]
+    ]
 
 
 async def build_operations_center(
@@ -88,9 +248,11 @@ async def build_operations_center(
     if version is None:
         raise ValueError(f"No state for simulation: {simulation_id}")
 
+    tick = int(version.tick)
     state = version.state_json or {}
     metadata = dict(state.get("metadata") or {})
     alerts: list[dict] = []
+    crisis_alert_roots: dict[str, str] = {}
 
     crisis_nodes = metadata.get("crisis_graph", {}).get("nodes", {})
     for crisis_id, node in crisis_nodes.items():
@@ -115,11 +277,15 @@ async def build_operations_center(
             + uncertainty * 0.10
             + phase_risk
         )
-        alerts.append(_alert(
+        root_event_id = str(node.get("root_event_id") or "")
+        alert = _alert(
             simulation_id,
             kind="crisis",
             subject=str(crisis_id),
-            title=f"{str(node.get('event_type') or 'crisis').replace('_', ' ').title()} escalating",
+            title=(
+                f"{str(node.get('event_type') or 'crisis').replace('_', ' ').title()} "
+                "escalating"
+            ),
             message=(
                 f"Phase {node.get('phase', 'unknown')}; intensity {intensity:.0%}, "
                 f"escalation {escalation:.0%}, contagion {contagion:.0%}."
@@ -132,28 +298,65 @@ async def build_operations_center(
                 "escalation": escalation,
                 "contagion": contagion,
                 "uncertainty": uncertainty,
+                "root_event_id": root_event_id or None,
             },
-        ))
+        )
+        alerts.append(alert)
+        if root_event_id:
+            crisis_alert_roots[alert["id"]] = root_event_id
 
     markets = metadata.get("markets", {})
     market_rules = (
-        ("financial_stress", float(markets.get("financial_stress", 0.0)), 0.18, "Financial stress elevated"),
-        ("energy_price", abs(float(markets.get("energy_price", 0.0))), 0.16, "Energy price shock"),
-        ("global_trade", abs(min(0.0, float(markets.get("global_trade", 0.0)))), 0.12, "Global trade contraction"),
-        ("commodity_supply", abs(min(0.0, float(markets.get("commodity_supply", 0.0)))), 0.12, "Commodity supply disruption"),
+        (
+            "financial_stress",
+            float(markets.get("financial_stress", 0.0)),
+            0.18,
+            "Financial stress elevated",
+        ),
+        (
+            "energy_price",
+            abs(float(markets.get("energy_price", 0.0))),
+            0.16,
+            "Energy price shock",
+        ),
+        (
+            "global_trade",
+            abs(min(0.0, float(markets.get("global_trade", 0.0)))),
+            0.12,
+            "Global trade contraction",
+        ),
+        (
+            "commodity_supply",
+            abs(min(0.0, float(markets.get("commodity_supply", 0.0)))),
+            0.12,
+            "Commodity supply disruption",
+        ),
     )
     for field, magnitude, threshold, title in market_rules:
         if magnitude < threshold:
             continue
-        score = _clamp((magnitude - threshold) / max(0.01, 0.60 - threshold) * 0.65 + 0.35)
+        score = _clamp(
+            (magnitude - threshold) / max(0.01, 0.60 - threshold) * 0.65 + 0.35
+        )
         alerts.append(_alert(
             simulation_id,
             kind="market",
             subject=field,
             title=title,
-            message=f"{field.replace('_', ' ')} moved to {float(markets.get(field, 0.0)):+.3f}.",
+            message=(
+                f"{field.replace('_', ' ')} moved to "
+                f"{float(markets.get(field, 0.0)):+.3f}."
+            ),
             score=score,
-            metrics={"value": float(markets.get(field, 0.0)), "threshold": threshold},
+            metrics={
+                "value": float(markets.get(field, 0.0)),
+                "threshold": threshold,
+            },
+            evidence=[{
+                "type": "model_state",
+                "source": "global_markets",
+                "tick": tick,
+            }],
         ))
 
     actors = (
@@ -195,6 +398,13 @@ async def build_operations_center(
                 score=score,
                 actor_ids=[actor.id],
                 metrics={field: float(getattr(actor, field))},
+                evidence=[{
+                    "type": "model_state",
+                    "source": "actor_state",
+                    "actor_id": actor.id,
+                    "field": field,
+                    "tick": tick,
+                }],
             ))
 
     predictions = await build_prediction_center(session, simulation_id)
@@ -219,28 +429,37 @@ async def build_operations_center(
                     "uncertainty": uncertainty,
                     "expected_stability": horizon.get("expected"),
                 },
+                evidence=[{
+                    "type": "model_forecast",
+                    "source": predictions.get(
+                        "model_version",
+                        "prediction-center",
+                    ),
+                    "actor_id": row["actor_id"],
+                    "horizon": 7,
+                    "tick": tick,
+                }],
             ))
 
-    alert_ids = [item["id"] for item in alerts]
-    states = []
-    if alert_ids:
-        states = (
-            await session.execute(
-                select(AlertStateModel).where(AlertStateModel.alert_id.in_(alert_ids))
-            )
-        ).scalars().all()
-    state_by_id = {row.alert_id: row for row in states}
-
+    evidence_by_event = await _external_evidence(
+        session,
+        set(crisis_alert_roots.values()),
+    )
     for item in alerts:
-        row = state_by_id.get(item["id"])
-        if row is None:
-            continue
-        item["status"] = row.status
-        item["acknowledged_by"] = row.acknowledged_by
-        item["acknowledged_at"] = (
-            row.acknowledged_at.isoformat() if row.acknowledged_at else None
-        )
-        item["note"] = row.note
+        root_event_id = crisis_alert_roots.get(item["id"])
+        if root_event_id:
+            item["evidence"] = evidence_by_event.get(root_event_id, [{
+                "type": "external_event",
+                "event_id": root_event_id,
+                "source_urls": [],
+            }])
+
+    recent_resolved = await _sync_alert_lifecycle(
+        session,
+        simulation_id,
+        tick,
+        alerts,
+    )
 
     alerts.sort(
         key=lambda item: (
@@ -260,18 +479,21 @@ async def build_operations_center(
         else:
             open_count += 1
 
-    open_alerts = [item for item in alerts if item["status"] != "acknowledged"]
-    if counts["critical"]:
+    open_alerts = [
+        item for item in alerts
+        if item["status"] not in {"acknowledged", "resolved"}
+    ]
+    if any(item["severity"] == "critical" for item in open_alerts):
         posture = "critical"
-    elif counts["high"]:
+    elif any(item["severity"] == "high" for item in open_alerts):
         posture = "heightened"
-    elif counts["medium"]:
+    elif any(item["severity"] == "medium" for item in open_alerts):
         posture = "watch"
     else:
         posture = "normal"
 
-    watch_actors = []
-    watch_crises = []
+    watch_actors: list[str] = []
+    watch_crises: list[str] = []
     for item in open_alerts:
         for actor_id in item["actor_ids"]:
             if actor_id not in watch_actors:
@@ -281,15 +503,17 @@ async def build_operations_center(
 
     return {
         "simulation_id": simulation_id,
-        "tick": int(version.tick),
+        "tick": tick,
         "posture": posture,
         "summary": {
             **counts,
             "open": open_count,
             "acknowledged": acknowledged_count,
+            "resolved_recent": len(recent_resolved),
             "total": len(alerts),
         },
         "alerts": alerts,
+        "recent_resolved": recent_resolved,
         "brief": {
             "headline": (
                 f"{open_count} open alerts; "
@@ -314,9 +538,50 @@ async def build_operations_center(
             "watch_actors": watch_actors[:8],
             "watch_crises": watch_crises[:8],
             "forecast_calibration": predictions.get("calibration", {}),
-            "generated_from_tick": int(version.tick),
+            "generated_from_tick": tick,
         },
     }
+
+
+async def list_alert_history(
+    session: AsyncSession,
+    simulation_id: str,
+    *,
+    status: str | None = None,
+    limit: int = 100,
+) -> list[dict]:
+    query = (
+        select(AlertStateModel)
+        .where(AlertStateModel.simulation_id == simulation_id)
+        .order_by(
+            AlertStateModel.updated_at.desc(),
+            AlertStateModel.alert_id,
+        )
+        .limit(max(1, min(500, int(limit))))
+    )
+    if status:
+        if status not in {"open", "acknowledged", "resolved"}:
+            raise ValueError("Unknown alert history status")
+        query = query.where(AlertStateModel.status == status)
+
+    rows = (await session.execute(query)).scalars().all()
+    return [{
+        "id": row.alert_id,
+        "simulation_id": row.simulation_id,
+        "status": row.status,
+        "title": row.last_title or row.alert_id,
+        "severity": row.last_severity or "low",
+        "first_seen_tick": int(row.first_seen_tick or 0),
+        "last_seen_tick": int(row.last_seen_tick or 0),
+        "occurrence_count": int(row.occurrence_count or 1),
+        "acknowledged_by": row.acknowledged_by,
+        "acknowledged_at": (
+            row.acknowledged_at.isoformat() if row.acknowledged_at else None
+        ),
+        "resolved_at": row.resolved_at.isoformat() if row.resolved_at else None,
+        "note": row.note,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    } for row in rows]
 
 
 async def set_alert_state(
@@ -332,29 +597,26 @@ async def set_alert_state(
         raise ValueError("Alert status must be 'open' or 'acknowledged'")
 
     center = await build_operations_center(session, simulation_id)
-    alert = next((item for item in center["alerts"] if item["id"] == alert_id), None)
+    alert = next(
+        (item for item in center["alerts"] if item["id"] == alert_id),
+        None,
+    )
     if alert is None:
         raise ValueError(f"Unknown active alert: {alert_id}")
 
     row = await session.get(AlertStateModel, alert_id)
-    now = datetime.now(timezone.utc)
     if row is None:
-        row = AlertStateModel(
-            alert_id=alert_id,
-            simulation_id=simulation_id,
-            status=status,
-            acknowledged_by=acknowledged_by if status == "acknowledged" else None,
-            note=note,
-            acknowledged_at=now if status == "acknowledged" else None,
-            updated_at=now,
-        )
-        session.add(row)
-    else:
-        row.status = status
-        row.acknowledged_by = acknowledged_by if status == "acknowledged" else None
-        row.note = note
-        row.acknowledged_at = now if status == "acknowledged" else None
-        row.updated_at = now
+        raise ValueError(f"Alert lifecycle state missing: {alert_id}")
+
+    now = datetime.now(timezone.utc)
+    row.status = status
+    row.acknowledged_by = (
+        acknowledged_by if status == "acknowledged" else None
+    )
+    row.note = note
+    row.acknowledged_at = now if status == "acknowledged" else None
+    row.resolved_at = None
+    row.updated_at = now
 
     await session.commit()
     return {
@@ -362,6 +624,12 @@ async def set_alert_state(
         "simulation_id": simulation_id,
         "status": row.status,
         "acknowledged_by": row.acknowledged_by,
-        "acknowledged_at": row.acknowledged_at.isoformat() if row.acknowledged_at else None,
+        "acknowledged_at": (
+            row.acknowledged_at.isoformat()
+            if row.acknowledged_at else None
+        ),
+        "first_seen_tick": int(row.first_seen_tick or 0),
+        "last_seen_tick": int(row.last_seen_tick or 0),
+        "occurrence_count": int(row.occurrence_count or 1),
         "note": row.note,
     }
