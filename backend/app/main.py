@@ -24,7 +24,11 @@ from .live_intelligence import (
 )
 from .live_outlook import build_live_outlook
 from .prediction_center import build_prediction_center
-from .operations_center import build_operations_center, set_alert_state
+from .operations_center import (
+    build_operations_center,
+    list_alert_history,
+    set_alert_state,
+)
 from .runtime_bus import runtime_bus
 from .strategic_gameplay import (
     actor_detail,
@@ -340,6 +344,24 @@ async def simulation_operations_center(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@app.get('/api/simulations/{simulation_id}/alerts/history')
+async def simulation_alert_history(
+    simulation_id: str,
+    status: str | None = None,
+    limit: int = 100,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await list_alert_history(
+            db,
+            simulation_id,
+            status=status,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.post('/api/simulations/{simulation_id}/alerts/{alert_id}/state')
 async def simulation_alert_state(
     simulation_id: str,
@@ -386,6 +408,7 @@ async def live_operations_center(db: AsyncSession = Depends(get_db)):
             'brief': {
                 'headline': 'No live simulation is available yet.',
                 'top_priorities': [],
+                'recommended_actions': [],
                 'watch_actors': [],
                 'watch_crises': [],
                 'forecast_calibration': {},
@@ -393,6 +416,27 @@ async def live_operations_center(db: AsyncSession = Depends(get_db)):
             },
         }
     return await build_operations_center(db, simulation_id)
+
+@app.get('/api/live-intelligence/alerts/history')
+async def live_alert_history(
+    status: str | None = None,
+    limit: int = 100,
+    db: AsyncSession = Depends(get_db),
+):
+    state = await get_live_state_snapshot()
+    simulation_id = state.get('last_simulation_id')
+    if not simulation_id:
+        return []
+    try:
+        return await list_alert_history(
+            db,
+            simulation_id,
+            status=status,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
 
 @app.post('/api/live-intelligence/run-now')
 async def live_intelligence_run_now():
