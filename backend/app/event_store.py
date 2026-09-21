@@ -66,14 +66,85 @@ async def persist_events(session: AsyncSession, events: list[NormalizedEvent]) -
         existing = await session.get(EventModel, event.event_id)
         if existing:
             duplicate_count += 1
-            existing.source_count = max(existing.source_count, event.source_count)
-            existing.confidence = max(existing.confidence, event.confidence)
-            existing.status = event.status
-            metadata = existing.metadata_json if isinstance(existing.metadata_json, dict) else {}
-            metadata.update(event.metadata or {})
-            metadata["source_urls"] = list(event.source_urls)
-            metadata["actors"] = list(event.actors)
+            old_metadata = (
+                dict(existing.metadata_json)
+                if isinstance(existing.metadata_json, dict)
+                else {}
+            )
+            incoming_metadata = dict(event.metadata or {})
+            old_origins = set(old_metadata.get("origin_keys") or [])
+            incoming_origins = set(incoming_metadata.get("origin_keys") or [])
+            combined_origins = sorted(old_origins | incoming_origins)
+            new_origin_count = len(incoming_origins - old_origins)
+
+            old_quality_count = max(
+                1,
+                int(old_metadata.get("independent_source_count", existing.source_count or 1)),
+            )
+            incoming_quality_count = max(
+                1,
+                int(incoming_metadata.get("independent_source_count", event.source_count or 1)),
+            )
+            old_quality = float(old_metadata.get("source_quality_mean", 0.0))
+            incoming_quality = float(incoming_metadata.get("source_quality_mean", 0.0))
+            quality_mean = (
+                old_quality * old_quality_count
+                + incoming_quality * incoming_quality_count
+            ) / max(1, old_quality_count + incoming_quality_count)
+
+            combined_count = max(
+                int(existing.source_count or 1),
+                len(combined_origins),
+                int(event.source_count or 1),
+            )
+            existing.source_count = combined_count
+            existing.confidence = min(
+                0.99,
+                max(float(existing.confidence), float(event.confidence))
+                + 0.05 * new_origin_count,
+            )
+            existing.status = (
+                "FACT"
+                if (combined_count >= 2 and existing.confidence >= 0.60)
+                or existing.confidence >= 0.85
+                else "CLAIM"
+            )
+
+            metadata = old_metadata
+            metadata.update(incoming_metadata)
+            metadata["origin_keys"] = combined_origins
+            metadata["independent_source_count"] = combined_count
+            metadata["source_quality_mean"] = quality_mean
+            metadata["source_urls"] = sorted(set(
+                list(old_metadata.get("source_urls") or [])
+                + list(event.source_urls)
+            ))
+            metadata["actors"] = sorted(set(
+                list(old_metadata.get("actors") or [])
+                + list(event.actors)
+            ))
+            old_records = old_metadata.get("source_records")
+            incoming_records = incoming_metadata.get("source_records")
+            merged_records = []
+            seen_records = set()
+            for record in (
+                (old_records if isinstance(old_records, list) else [])
+                + (incoming_records if isinstance(incoming_records, list) else [])
+            ):
+                if not isinstance(record, dict):
+                    continue
+                pair = (
+                    str(record.get("source_id") or ""),
+                    str(record.get("source_url") or ""),
+                )
+                if pair in seen_records:
+                    continue
+                seen_records.add(pair)
+                merged_records.append(record)
+            if merged_records:
+                metadata["source_records"] = merged_records
             existing.metadata_json = metadata
+
             await _persist_event_sources(
                 session,
                 event.event_id,
