@@ -231,6 +231,9 @@ export type OperationsAlert = {
     confidence?: number;
     fact_status?: string;
     source_count?: number;
+    independent_source_count?: number;
+    source_quality_mean?: number;
+    confidence_model?: string;
     source_urls?: string[];
     source?: string;
     actor_id?: string;
