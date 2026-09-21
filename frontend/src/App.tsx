@@ -894,7 +894,12 @@ export default function App() {
                 <div key={item.id}>
                   <span>{item.event_type}</span>
                   <strong>{item.title}</strong>
-                  <small>{pct(item.confidence)} confidence · {item.actors.join(" · ") || "unlinked"}</small>
+                  <small>
+                    {pct(item.confidence)} confidence · {item.status} ·
+                    {" "}{item.independent_source_count ?? item.source_count} independent ·
+                    {" "}quality {pct(item.source_quality_mean ?? 0)} ·
+                    {" "}{item.actors.join(" · ") || "unlinked"}
+                  </small>
                 </div>
               ))}
               {!worldEvents.length && <p className="muted">No ingested live events yet.</p>}
