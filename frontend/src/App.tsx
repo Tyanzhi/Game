@@ -262,6 +262,28 @@ function OperationsCenterPanel({
                 </div>
                 <h3>{item.title}</h3>
                 <p>{item.message}</p>
+                {item.evidence.length > 0 && (
+                  <div className="ops-evidence">
+                    {item.evidence.slice(0, 2).map((evidence, index) => (
+                      <div key={`${item.id}-evidence-${index}`}>
+                        <span>{evidence.type}</span>
+                        <strong>
+                          {evidence.confidence == null ? "—" : pct(evidence.confidence)}
+                        </strong>
+                        <small>
+                          {evidence.independent_source_count != null
+                            ? `${evidence.independent_source_count} independent sources`
+                            : evidence.source_count != null
+                              ? `${evidence.source_count} sources`
+                              : evidence.source ?? "model evidence"}
+                          {evidence.source_quality_mean != null
+                            ? ` · quality ${pct(evidence.source_quality_mean)}`
+                            : ""}
+                        </small>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="ops-runbook">
                   <span>NEXT</span>
                   <strong>{item.operator_action}</strong>
