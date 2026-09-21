@@ -31,7 +31,18 @@ async def fetch_indicators(country_codes: tuple[str, ...] = ("USA", "CHN", "RUS"
                     title=f"{country} {label}: {value:.2f}% ({year})",
                     description=f"World Bank indicator {label} for {country}: {value:.2f}% in {year}.",
                     timestamp=datetime(int(year), 12, 31, tzinfo=timezone.utc) if year.isdigit() else datetime.now(timezone.utc),
-                    actor_ids=(country.lower(),), event_type="economic_indicator", confidence=0.98,
-                    raw={"indicator": indicator, "indicator_name": label, "country": country, "year": year, "value": value},
+                    actor_ids=(country.lower(),),
+                    event_type="economic_indicator",
+                    confidence=0.98,
+                    source_quality=0.98,
+                    raw={
+                        "provider": "worldbank",
+                        "source_type": "structured_official_data",
+                        "indicator": indicator,
+                        "indicator_name": label,
+                        "country": country,
+                        "year": year,
+                        "value": value,
+                    },
                 ))
     return events
