@@ -128,8 +128,22 @@ def normalize(events: Iterable[RawEvent]) -> list[NormalizedEvent]:
             or confidence >= 0.85
             else "CLAIM"
         )
+        source_records = []
+        seen_source_records = set()
+        for item in group:
+            key = (item.source_id, item.source_url)
+            if key in seen_source_records:
+                continue
+            seen_source_records.add(key)
+            source_records.append({
+                "source_id": item.source_id,
+                "source_url": item.source_url,
+                "source_quality": _clamp(item.source_quality),
+                "origin_key": _origin_key(item),
+            })
         metadata = {
             "raw_sources": [item.raw or {} for item in group],
+            "source_records": source_records,
             "dedup_group_size": len(group),
             **quality_metadata,
         }
