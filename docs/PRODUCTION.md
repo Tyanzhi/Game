@@ -90,3 +90,30 @@ For the initial production deployment, keep a single live-worker. Multiple live-
 ## Live intelligence
 
 The dedicated worker continuously advances the persistent `live-world` timeline. It ingests live evidence, advances the simulation, persists forecasts/calibration and publishes realtime messages through Redis. The API subscribes to that bus and forwards messages to Stage 7 WebSocket clients.
+
+
+## Distributed live-worker leadership
+
+Live workers use a Redis lease at `world-engine:live-worker-leader`. Multiple worker replicas may be running, but only the lease owner executes ingestion/simulation cycles; the others remain standby and periodically retry.
+
+Configuration:
+
+```
+LIVE_WORKER_LEASE_SECONDS=900
+LIVE_WORKER_STANDBY_POLL_SECONDS=30
+```
+
+The lease is renewed by the active worker and can only be renewed or released by the same ownership token. If the leader disappears, Redis expiry allows a standby worker to take over without manual intervention.
+
+## Evidence provenance and confidence
+
+Normalized events now retain one provenance record per source URL/origin. Confidence uses a quality-weighted corroboration model rather than source count alone. Event metadata includes:
+
+- `independent_source_count`
+- `source_quality_mean`
+- `weighted_prior_confidence`
+- `corroboration_bonus`
+- `confidence_model=quality_weighted_corroboration_v1`
+- `source_records[]` with source id, URL, origin key, source quality and source confidence
+
+Corroboration accumulates across separate live-ingestion cycles. A later independent source can therefore upgrade an existing event from CLAIM to FACT and increase confidence without creating a duplicate event.
