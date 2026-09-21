@@ -31,12 +31,17 @@ def upgrade() -> None:
     )
     op.add_column(
         "alert_states",
+        sa.Column("occurrence_count", sa.Integer(), server_default="1", nullable=False),
+    )
+    op.add_column(
+        "alert_states",
         sa.Column("resolved_at", sa.DateTime(timezone=True), nullable=True),
     )
 
 
 def downgrade() -> None:
     op.drop_column("alert_states", "resolved_at")
+    op.drop_column("alert_states", "occurrence_count")
     op.drop_column("alert_states", "last_title")
     op.drop_column("alert_states", "last_severity")
     op.drop_column("alert_states", "last_seen_tick")
