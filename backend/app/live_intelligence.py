@@ -258,15 +258,26 @@ async def recent_live_events(limit: int = 50) -> list[dict]:
                 .limit(max(1, min(200, int(limit))))
             )
         ).scalars().all()
-        return [{
-            "id": row.id,
-            "event_type": row.event_type,
-            "title": row.title,
-            "description": row.description,
-            "timestamp": row.event_timestamp.isoformat() if row.event_timestamp else None,
-            "confidence": float(row.confidence),
-            "status": row.status,
-            "source_count": row.source_count,
-            "actors": (row.metadata_json or {}).get("actors", []),
-            "source_urls": (row.metadata_json or {}).get("source_urls", []),
-        } for row in rows]
+        result = []
+        for row in rows:
+            metadata = row.metadata_json if isinstance(row.metadata_json, dict) else {}
+            result.append({
+                "id": row.id,
+                "event_type": row.event_type,
+                "title": row.title,
+                "description": row.description,
+                "timestamp": row.event_timestamp.isoformat() if row.event_timestamp else None,
+                "confidence": float(row.confidence),
+                "status": row.status,
+                "source_count": row.source_count,
+                "independent_source_count": int(
+                    metadata.get("independent_source_count", row.source_count)
+                ),
+                "source_quality_mean": float(
+                    metadata.get("source_quality_mean", 0.0)
+                ),
+                "confidence_model": metadata.get("confidence_model"),
+                "actors": metadata.get("actors", []),
+                "source_urls": metadata.get("source_urls", []),
+            })
+        return result
