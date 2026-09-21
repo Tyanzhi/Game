@@ -200,6 +200,7 @@ class AlertStateModel(Base):
     last_seen_tick: Mapped[int] = mapped_column(Integer, default=0)
     last_severity: Mapped[str | None] = mapped_column(String(30), nullable=True)
     last_title: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    occurrence_count: Mapped[int] = mapped_column(Integer, default=1)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
