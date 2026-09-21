@@ -39,8 +39,9 @@ async def fetch_news(query: str = "geopolitics", max_records: int = 25) -> list[
         domain = str(item.get("domain", ""))
         if not title:
             continue
+        origin = domain.lower().strip() or "unknown"
         result.append(RawEvent(
-            source_id=f"gdelt:{domain.lower() or 'unknown'}",
+            source_id=f"gdelt:{origin[:90]}",
             source_url=url,
             title=title,
             description=title,
