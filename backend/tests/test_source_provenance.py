@@ -77,3 +77,53 @@ async def test_event_store_keeps_each_provenance_url():
         ]
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_corroboration_accumulates_across_ingestion_cycles():
+    from app.models import EventModel
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with Session() as session:
+        first = normalize([
+            raw("gdelt:a.test", "a.test", "https://a.test/story"),
+        ])[0]
+        await persist_events(session, [first])
+        await session.commit()
+
+        stored = await session.get(EventModel, first.event_id)
+        first_confidence = stored.confidence
+        assert stored.source_count == 1
+        assert stored.status == "CLAIM"
+
+        second = normalize([
+            raw("gdelt:b.test", "b.test", "https://b.test/story"),
+        ])[0]
+        assert second.event_id == first.event_id
+        new_count, duplicate_count = await persist_events(session, [second])
+        await session.commit()
+
+        stored = await session.get(EventModel, first.event_id)
+        assert new_count == 0
+        assert duplicate_count == 1
+        assert stored.source_count == 2
+        assert stored.status == "FACT"
+        assert stored.confidence > first_confidence
+        assert stored.metadata_json["independent_source_count"] == 2
+
+        rows = (
+            await session.execute(
+                select(EventSourceModel)
+                .where(EventSourceModel.event_id == first.event_id)
+            )
+        ).scalars().all()
+        assert {(row.source_id, row.source_url) for row in rows} == {
+            ("gdelt:a.test", "https://a.test/story"),
+            ("gdelt:b.test", "https://b.test/story"),
+        }
+
+    await engine.dispose()
