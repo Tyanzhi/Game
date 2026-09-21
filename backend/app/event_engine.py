@@ -139,6 +139,7 @@ def normalize(events: Iterable[RawEvent]) -> list[NormalizedEvent]:
                 "source_id": item.source_id,
                 "source_url": item.source_url,
                 "source_quality": _clamp(item.source_quality),
+                "source_confidence": _clamp(item.confidence),
                 "origin_key": _origin_key(item),
             })
         metadata = {
