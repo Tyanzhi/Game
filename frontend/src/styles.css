@@ -680,3 +680,45 @@ input,select { width:100%; color:#e6f0ff; background:#07111e; border:1px solid #
   line-height:1.45;
   font-weight:700;
 }
+
+
+/* Alert evidence provenance */
+.ops-evidence {
+  display:grid;
+  gap:5px;
+  margin-top:9px;
+}
+.ops-evidence > div {
+  display:grid;
+  grid-template-columns:auto auto 1fr;
+  gap:7px;
+  align-items:center;
+  padding:7px 8px;
+  border:1px solid #142b45;
+  border-radius:8px;
+  background:#06101c;
+}
+.ops-evidence span {
+  color:#5f7897;
+  font-size:.55rem;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+}
+.ops-evidence strong {
+  color:#dce9f8;
+  font-size:.62rem;
+}
+.ops-evidence small {
+  color:#6d829d;
+  font-size:.58rem;
+  text-align:right;
+}
+@media (max-width:620px) {
+  .ops-evidence > div {
+    grid-template-columns:auto auto;
+  }
+  .ops-evidence small {
+    grid-column:1 / -1;
+    text-align:left;
+  }
+}
