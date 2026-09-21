@@ -174,10 +174,23 @@ async def run_live_intelligence_cycle(
         await persist_live_state()
         simulation_id = None
         try:
-            include_world_bank = live_state.cycles_completed % 24 == 0
+            now_utc = datetime.now(timezone.utc)
+            include_world_bank = now_utc.hour % 2 == 0 and now_utc.minute < 5
+            configured_limit = max(
+                1,
+                min(
+                    50,
+                    int(
+                        os.getenv(
+                            "LIVE_MAX_RECORDS_PER_QUERY",
+                            str(max_records_per_query),
+                        )
+                    ),
+                ),
+            )
             raw, source_errors = await collect_live_events(
                 queries=queries,
-                max_records_per_query=max_records_per_query,
+                max_records_per_query=configured_limit,
                 include_world_bank=include_world_bank,
             )
             normalized = normalize(raw)
