@@ -20,6 +20,7 @@ from .perception_engine import PerceptionEngine
 from .reaction_engine import plan_reactions
 from .realtime_pipeline import save_world_version
 from .simulation_tick import SimulationTickEngine, TickContext
+from .state_compaction import compact_world_metadata
 from .strategic_memory import decay_memory, update_memory_from_action
 from .strategic_dynamics import (
     build_coalitions,
@@ -529,12 +530,24 @@ async def run_simulation(
             return result
         async def snapshot(ctx):
             await sync_world_state_to_db(session, state)
+            compaction = compact_world_metadata(state.metadata, current_tick=tick)
             await persist_tick(session, simulation_id, state, changes, event_ids, ctx.phase_results)
             snapshot_data = state.snapshot()
             previous_hash = parent_hash
-            snapshot_hash = await save_world_version(session, simulation_id, tick, snapshot_data, parent_hash=previous_hash, dataset_version="live")
+            snapshot_hash = await save_world_version(
+                session,
+                simulation_id,
+                tick,
+                snapshot_data,
+                parent_hash=previous_hash,
+                dataset_version="live",
+            )
             ctx.payload["snapshot_hash"] = snapshot_hash
-            result = {"state_hash": snapshot_hash, "parent_hash": previous_hash}
+            result = {
+                "state_hash": snapshot_hash,
+                "parent_hash": previous_hash,
+                "compaction": compaction,
+            }
             await publish("snapshot", result)
             return result
         engine = SimulationTickEngine({"ingest": ingest, "state_update": state_update, "perception": perception, "decision": decision, "interaction": interaction, "action": action, "cascade": cascade, "forecast": forecast_phase, "snapshot": snapshot})
@@ -543,9 +556,28 @@ async def run_simulation(
         parent_hash = phase_data["snapshot"]["state_hash"]
         snapshot_data = state.snapshot()
         history.append(snapshot_data)
+        tick_summary = {
+            "type": "tick_completed",
+            "simulation_id": simulation_id,
+            "tick": tick,
+            "state_hash": parent_hash,
+            "changes": changes,
+            "summary": {
+                "actors": len(state.actors),
+                "crisis_nodes": len(
+                    state.metadata.get("crisis_graph", {}).get("nodes", {})
+                ),
+                "pending_forecasts": len(
+                    state.metadata.get("pending_forecasts", [])
+                ),
+                "delayed_effects": len(
+                    state.metadata.get("delayed_effects", [])
+                ),
+            },
+        }
         if broadcast:
-            await broadcast({"type": "tick_completed", "simulation_id": simulation_id, "tick": tick, "state": snapshot_data, "phase": phase_data, "changes": changes})
-        await event_bus.publish("simulation.tick_completed", {"simulation_id": simulation_id, "tick": tick, "state": snapshot_data, "phases": phase_data})
+            await broadcast(tick_summary)
+        await event_bus.publish("simulation.tick_completed", tick_summary)
     run.status = "completed"
     run.ticks = start_tick + ticks
     run.events_ingested = int(run.events_ingested or 0) + len(raw_events or [])
