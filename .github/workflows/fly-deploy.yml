@@ -1,0 +1,78 @@
+name: Fly Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/fly-deploy.yml"
+
+concurrency:
+  group: world-engine-fly-production
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate Fly target
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Parse fly.toml and verify runtime contract
+        run: |
+          python - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          config = tomllib.loads(Path("backend/fly.toml").read_text())
+          assert config["processes"]["api"]
+          assert config["processes"]["worker"]
+          assert config["deploy"]["release_command"] == "alembic upgrade head"
+          assert config["http_service"]["internal_port"] == 8000
+          assert config["http_service"]["processes"] == ["api"]
+          assert config["env"]["EMBEDDED_LIVE_SCHEDULER"] == "0"
+          print("Fly runtime contract valid")
+          PY
+
+  deploy:
+    name: Deploy to Fly.io
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: fly-production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Check Fly credentials
+        id: auth
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "FLY_API_TOKEN is not configured; deployment skipped."
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Validate Fly configuration
+        if: steps.auth.outputs.enabled == 'true'
+        working-directory: backend
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl config validate --strict -c fly.toml
+      - name: Deploy WORLD ENGINE
+        if: steps.auth.outputs.enabled == 'true'
+        working-directory: backend
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --remote-only -c fly.toml
+      - name: Verify Fly health
+        if: steps.auth.outputs.enabled == 'true'
+        working-directory: backend
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl status -c fly.toml
+          flyctl checks list -c fly.toml
