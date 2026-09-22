@@ -186,7 +186,7 @@ class CrisisGraph:
             raw["participants"] = sorted(connected)
             raw["escalation"] = round(max(0.0, intensity - 0.35), 6)
             raw["contagion"] = round(min(1.0, len(connected) / max(1, len(actors))), 6)
-            raw["uncertainty"] = round(max(0.0, 1.0 - float(raw.get("uncertainty", 0.0)) * 0.9), 6)
+            raw["uncertainty"] = round(max(0.0, min(1.0, float(raw.get("uncertainty", 0.0)) * 0.9)), 6)
 
             if phase == "resolved":
                 continue
