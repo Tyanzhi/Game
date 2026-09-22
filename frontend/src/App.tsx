@@ -242,6 +242,7 @@ function OperationsCenterPanel({
         <div><span>high</span><strong>{center.summary.high}</strong></div>
         <div><span>open</span><strong>{center.summary.open}</strong></div>
         <div><span>acknowledged</span><strong>{center.summary.acknowledged}</strong></div>
+        <div><span>resolved</span><strong>{center.summary.resolved_recent ?? 0}</strong></div>
       </div>
 
       <div className="operations-grid">
@@ -280,6 +281,15 @@ function OperationsCenterPanel({
                             ? ` · quality ${pct(evidence.source_quality_mean)}`
                             : ""}
                         </small>
+                        {evidence.source_urls && evidence.source_urls.length > 0 && (
+                          <div className="ops-source-links">
+                            {evidence.source_urls.slice(0, 3).map((url) => (
+                              <a key={url} href={url} target="_blank" rel="noreferrer">
+                                SOURCE
+                              </a>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -372,6 +382,18 @@ function OperationsCenterPanel({
                 >
                   REOPEN · {item.title}
                 </button>
+              ))}
+            </div>
+          )}
+
+          {(center.recent_resolved?.length ?? 0) > 0 && (
+            <div className="brief-section resolved-list">
+              <span>Recently resolved</span>
+              {center.recent_resolved!.slice(0, 6).map((item) => (
+                <div key={item.id}>
+                  <strong>{item.title}</strong>
+                  <small>{item.severity} · T{item.last_seen_tick} · ×{item.occurrence_count}</small>
+                </div>
               ))}
             </div>
           )}
