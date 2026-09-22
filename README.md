@@ -104,3 +104,45 @@ The center exposes:
 Alternative futures share the same deterministic forecast noise so scenario differences come from assumptions/drivers rather than random variation.
 
 The Stage 7 frontend renders these outputs as a horizon switcher, scenario matrix, calibration panel and causal graph. New live evidence advances the same `live-world` timeline, so the displayed probabilities can change as new events are ingested.
+
+
+## Stage 7 Alert & Operations Center
+
+The Operations Center turns simulation state into an operator-facing alert queue rather than requiring the user to inspect every subsystem manually.
+
+Endpoints:
+
+- `GET /api/simulations/{simulation_id}/operations-center`
+- `GET /api/simulations/{simulation_id}/alerts/history`
+- `POST /api/simulations/{simulation_id}/alerts/{alert_id}/state`
+- `GET /api/live-intelligence/operations-center`
+- `GET /api/live-intelligence/alerts/history`
+
+Alert generation combines active crisis intensity/escalation/contagion, market stress, actor stability/domestic pressure/information quality and forecast uncertainty. Alerts are assigned a deterministic severity and operational posture.
+
+Alert lifecycle is persistent:
+
+```
+open → acknowledged → open
+  ↘
+   resolved automatically when the underlying condition disappears
+```
+
+Acknowledgement state, operator note, first/last seen tick, occurrence count and recent resolution history are persisted in PostgreSQL.
+
+Crisis alerts carry evidence provenance where available: originating external event, confidence, independent-source count, mean source quality and source URLs. Model-generated alerts are explicitly marked as model-state or model-forecast evidence.
+
+The Stage 7 frontend renders:
+
+- critical/high/open/acknowledged/resolved counters;
+- operational posture;
+- active alert queue;
+- evidence/provenance and external source links;
+- operator runbooks;
+- acknowledge/reopen controls;
+- actor/crisis navigation;
+- command brief, priorities and recommended actions;
+- watch actors and crises;
+- recently resolved alert history.
+
+The Operations Center is an analytical/operator interface. Forecasts and alert severity are model outputs with uncertainty, not assertions that future events are certain.
