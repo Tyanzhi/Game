@@ -357,6 +357,82 @@ export type PredictionCenter = {
   model_version: string;
 };
 
+
+export type OperationsAlert = {
+  id: string;
+  kind: string;
+  subject: string;
+  title: string;
+  message: string;
+  score: number;
+  severity: "critical" | "high" | "medium" | "low";
+  actor_ids: string[];
+  crisis_id?: string | null;
+  metrics: Record<string, unknown>;
+  evidence: Array<Record<string, unknown>>;
+  operator_action: string;
+  status: "open" | "acknowledged" | "resolved";
+  acknowledged_by?: string | null;
+  acknowledged_at?: string | null;
+  note?: string | null;
+  first_seen_tick?: number | null;
+  last_seen_tick?: number | null;
+  occurrence_count: number;
+  resolved_at?: string | null;
+};
+
+export type AlertHistoryItem = {
+  id: string;
+  simulation_id: string;
+  status: "open" | "acknowledged" | "resolved";
+  title: string;
+  severity: "critical" | "high" | "medium" | "low";
+  first_seen_tick: number;
+  last_seen_tick: number;
+  occurrence_count: number;
+  acknowledged_by?: string | null;
+  acknowledged_at?: string | null;
+  resolved_at?: string | null;
+  note?: string | null;
+  updated_at?: string | null;
+};
+
+export type OperationsCenter = {
+  simulation_id: string | null;
+  status?: string;
+  tick: number;
+  posture: "normal" | "watch" | "heightened" | "critical";
+  summary: {
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+    open: number;
+    acknowledged: number;
+    resolved_recent?: number;
+    total: number;
+  };
+  alerts: OperationsAlert[];
+  recent_resolved?: AlertHistoryItem[];
+  brief: {
+    headline: string;
+    top_priorities: Array<{
+      id: string;
+      title: string;
+      severity: string;
+    }>;
+    recommended_actions: Array<{
+      alert_id: string;
+      severity: string;
+      action: string;
+    }>;
+    watch_actors: string[];
+    watch_crises: string[];
+    forecast_calibration: Record<string, unknown>;
+    generated_from_tick: number;
+  };
+};
+
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -519,6 +595,42 @@ export const api = {
       causal_graph: { nodes: []; edges: [] };
       calibration: { scored_targets: number; mean_brier: null; quality: string };
     }>("/api/live-intelligence/prediction-center"),
+  operationsCenter: (simulationId: string) =>
+    request<OperationsCenter>(
+      `/api/simulations/${encodeURIComponent(simulationId)}/operations-center`
+    ),
+  liveOperationsCenter: () =>
+    request<OperationsCenter>("/api/live-intelligence/operations-center"),
+  alertHistory: (simulationId: string, status?: string, limit = 100) => {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (status) query.set("status", status);
+    return request<AlertHistoryItem[]>(
+      `/api/simulations/${encodeURIComponent(simulationId)}/alerts/history?${query.toString()}`
+    );
+  },
+  setAlertState: (
+    simulationId: string,
+    alertId: string,
+    payload: { status: "open" | "acknowledged"; acknowledged_by?: string; note?: string }
+  ) =>
+    request<{
+      alert_id: string;
+      simulation_id: string;
+      status: string;
+      acknowledged_by?: string | null;
+      acknowledged_at?: string | null;
+      first_seen_tick: number;
+      last_seen_tick: number;
+      occurrence_count: number;
+      note?: string | null;
+    }>(
+      `/api/simulations/${encodeURIComponent(simulationId)}/alerts/${encodeURIComponent(alertId)}/state`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }
+    ),
   runLiveNow: () =>
     request<LiveIntelligenceStatus>("/api/live-intelligence/run-now", { method: "POST" }),
   runSimulation: (ticks: number, seed: number) =>
