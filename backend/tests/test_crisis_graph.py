@@ -75,3 +75,16 @@ def test_interacting_crises_create_compounding_edge():
         item.get("interaction_pressure", 0.0) > 0.0
         for item in state["crisis_graph"]["history"]
     )
+
+
+def test_crisis_uncertainty_decays_with_repeated_observation():
+    state = {}
+    g = CrisisGraph()
+    event = make_event()
+    g.advance(state, [event], actors(), {}, 1, 7)
+    node = next(iter(state["crisis_graph"]["nodes"].values()))
+    first = float(node["uncertainty"])
+    g.advance(state, [event], actors(), {}, 2, 7)
+    second = float(node["uncertainty"])
+    assert second <= first
+    assert 0.0 <= second <= 1.0
