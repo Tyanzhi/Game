@@ -36,7 +36,7 @@ input,select { width:100%; color:#e6f0ff; background:#07111e; border:1px solid #
 .controls button { border:0; border-radius:9px; min-height:40px; align-self:end; color:#031019; font-weight:900; letter-spacing:.08em; background:linear-gradient(135deg,#2bd8af,#468bff); }
 .controls button:disabled { opacity:.5; }
 .simulation-picker { margin-top:12px; }
-.telemetry { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; }
+.telemetry { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
 .telemetry div { padding:12px; border-radius:11px; border:1px solid #13243c; background:#07101c; }
 .telemetry span,.telemetry strong { display:block; }
 .telemetry span { color:#667d9a; font-size:.62rem; letter-spacing:.12em; }
@@ -470,7 +470,7 @@ input,select { width:100%; color:#e6f0ff; background:#07111e; border:1px solid #
 
 .alert-kpis {
   display:grid;
-  grid-template-columns:repeat(4,1fr);
+  grid-template-columns:repeat(5,1fr);
   gap:8px;
   margin-top:14px;
 }
