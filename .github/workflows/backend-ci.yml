@@ -188,3 +188,22 @@ jobs:
 
           asyncio.run(main())
           PY
+
+
+  source-archive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Upload complete WORLD ENGINE source
+        uses: actions/upload-artifact@v4
+        with:
+          name: world-engine-full-source
+          path: |
+            .
+            !.git/**
+            !frontend/node_modules/**
+            !backend/.venv/**
+            !**/__pycache__/**
+            !**/.pytest_cache/**
+          if-no-files-found: error
+          retention-days: 7
