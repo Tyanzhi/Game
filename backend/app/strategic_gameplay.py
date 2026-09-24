@@ -255,6 +255,7 @@ async def submit_player_action(
     action_type: str,
     target_actor_id: str | None = None,
     rationale: str = "player_selected",
+    explain: bool = True,
 ) -> dict:
     if action_type not in ALLOWED_ACTIONS:
         raise ValueError(f"Unsupported action: {action_type}")
@@ -314,43 +315,16 @@ async def submit_player_action(
     session.add(action)
     await session.flush()
 
+    from .integration_state import load_world_state
+    before_action = await load_world_state(session, simulation_id)
     result = await execute_action(session, action_id)
-    effects = result.get("effects") or {}
-    field_map = {
-        "information_quality_delta": "information_quality",
-        "economic_capacity_delta": "economic_capacity",
-        "stability_delta": "stability",
-        "security_capacity_delta": "security_capacity",
-        "domestic_pressure_delta": "domestic_pressure",
-        "diplomatic_capacity_delta": "diplomatic_capacity",
-    }
-    for key, field in field_map.items():
-        if key in effects:
-            session.add(EffectModel(
-                simulation_id=simulation_id,
-                tick=tick,
-                source=actor_id,
-                target=actor_id,
-                field=field,
-                delta=float(effects[key]),
-                confidence=1.0,
-                depth=0,
-                mechanism="player_action",
-            ))
-    if effects.get("diplomatic_delta") and target_actor_id:
-        session.add(EffectModel(
-            simulation_id=simulation_id,
-            tick=tick,
-            source=actor_id,
-            target=target_actor_id,
-            field="diplomatic",
-            delta=float(effects["diplomatic_delta"]),
-            confidence=1.0,
-            depth=0,
-            mechanism="player_action",
-        ))
-
-    await session.commit()
+    if explain:
+        from .simulation import run_simulation
+        await run_simulation(session, ticks=1, simulation_id=simulation_id,
+            initial_state=before_action, player_actions=[{**result, "decision_id": decision_id}],
+            controlled_actor_id=actor_id, disable_ai=True, mode="player")
+    else:
+        await session.flush()
     return {
         "simulation_id": simulation_id,
         "tick": tick,

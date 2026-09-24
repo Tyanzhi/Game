@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .models import ActionModel, ActorModel, DecisionModel, RelationshipModel
 from sqlalchemy import select
@@ -25,6 +25,8 @@ class ReactionPlan:
     score: float
     reason: str
     source_action_id: str
+    factors: dict = field(default_factory=dict)
+    alternatives: list = field(default_factory=list)
 
 
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
@@ -101,13 +103,21 @@ async def plan_reactions(
             - float(target_actor.strategic_patience or 0.0) * 0.12
         )
 
-        if information_signal > 0.0 and float(target_actor.information_quality or 0.0) < 0.55:
+        conditions = [
+            ("observe", information_signal > 0.0 and float(target_actor.information_quality or 0.0) < 0.55),
+            ("defensive_posture", security_signal > 0.0 or threat > float(target_actor.escalation_threshold or 0.6)),
+            ("economic_adjustment", economic_signal > 0.0 and float(target_actor.economic_capacity or 0.0) > 0.25),
+            ("diplomatic_outreach", response_intensity < 0.34),
+            ("public_statement", True),
+        ]
+        override_draw = None
+        if conditions[0][1]:
             selected = "observe"
             reason = "intelligence_uncertainty_response"
-        elif security_signal > 0.0 or threat > float(target_actor.escalation_threshold or 0.6):
+        elif conditions[1][1]:
             selected = "defensive_posture"
             reason = "security_threshold_response"
-        elif economic_signal > 0.0 and float(target_actor.economic_capacity or 0.0) > 0.25:
+        elif conditions[2][1]:
             selected = "economic_adjustment"
             reason = "economic_pressure_response"
         elif response_intensity < 0.34:
@@ -118,9 +128,11 @@ async def plan_reactions(
             reason = "political_signal_response"
 
         # Information quality can convert a strong signal into observation.
-        if float(target_actor.information_quality or 0.0) < 0.35 and rng.random() < 0.65:
-            selected = "observe"
-            reason = "uncertainty_response"
+        if float(target_actor.information_quality or 0.0) < 0.35:
+            override_draw = rng.random()
+            if override_draw < 0.65:
+                selected = "observe"
+                reason = "uncertainty_response"
 
         plans.append(
             ReactionPlan(
@@ -130,6 +142,17 @@ async def plan_reactions(
                 score=response_intensity,
                 reason=reason,
                 source_action_id=str(action.get("action_id") or ""),
+                factors={"threat": threat, "response_intensity": response_intensity,
+                    "information_signal": information_signal, "security_signal": security_signal,
+                    "economic_signal": economic_signal, "diplomatic": diplomatic,
+                    "information_quality": float(target_actor.information_quality or 0.0),
+                    "economic_capacity": float(target_actor.economic_capacity or 0.0),
+                    "escalation_threshold": float(target_actor.escalation_threshold or 0.6),
+                    "domestic_pressure": float(target_actor.domestic_pressure or 0.0),
+                    "strategic_patience": float(target_actor.strategic_patience or 0.0),
+                    "uncertainty_override_draw": override_draw},
+                alternatives=[{"action": name, "rule_matched": matched, "priority": priority,
+                    "selected": name == selected} for priority, (name, matched) in enumerate(conditions)],
             )
         )
 
@@ -152,6 +175,9 @@ async def plan_reactions(
                     score=response_intensity * 0.55,
                     reason="third_party_intervention",
                     source_action_id=str(action.get("action_id") or ""),
+                    factors={"diplomatic": third_diplomatic, "intervention_rate": third_party_rate},
+                    alternatives=[{"action": name, "selected": name == third_action}
+                        for name in ("diplomatic_outreach", "public_statement")],
                 )
             )
 
@@ -164,6 +190,7 @@ async def plan_reactions(
             "reaction_to_action_id": plan.source_action_id,
             "reaction_reason": plan.reason,
             "reaction_score": round(plan.score, 6),
+            "reaction_factors": plan.factors,
         }
         effects = {k: v for k, v in effects.items() if v is not None}
         session.add(
@@ -175,7 +202,7 @@ async def plan_reactions(
                 selected_action=plan.action_type,
                 confidence=max(0.0, min(1.0, float(actors[plan.actor_id].information_quality or 0.0))),
                 reasoning_factors=[plan.reason],
-                options=[{"action": plan.action_type, "score": plan.score}],
+                options=plan.alternatives,
                 information_state=effects.copy(),
             )
         )
@@ -201,6 +228,11 @@ async def plan_reactions(
                 "target_actor_id": plan.target_actor_id,
                 "reaction": True,
                 "reason": plan.reason,
+                "reasoning_factors": [plan.reason],
+                "options": plan.alternatives,
+                "information_state": effects.copy(),
+                "reaction_to_action_id": plan.source_action_id,
+                "confidence": float(actors[plan.actor_id].information_quality or 0.0),
             }
         )
 

@@ -30,9 +30,13 @@ export function AnalysisPanel({ ticks }: { ticks: Tick[] }) {
       <p className="muted">Тик {report.tick} · {current?.created_at ?? "время не записано"} · {report.version}</p>
       <h3>Краткий итог</h3><p>{report.summary}</p>
       <h3>Изменения относительно предыдущего шага</h3>
-      <ul>{report.changes.slice(0, level === "brief" ? 3 : 30).map((c, i) => <li key={i}>{c.text}</li>)}</ul>
+      <ul>{report.changes.slice(0, level === "brief" ? 3 : undefined).map((c, i) => <li key={i}>{c.text}
+        {level !== "brief" && !!c.causes?.length && <details><summary>Причины изменения</summary><ul>{c.causes.map((s, j) => <li key={j}>{s}</li>)}</ul></details>}
+      </li>)}</ul>
       {report.changes.length > (level === "brief" ? 3 : 30) && <p>Показаны крупнейшие изменения; полный перечень — в техническом отчёте.</p>}
       {level !== "brief" && <>
+        <h3>Основные события модели</h3>
+        {(report.model_events ?? []).length ? <ul>{report.model_events?.map((e, i) => <li key={i}>{e.description}</li>)}</ul> : <p>Новых вторичных событий и случайных шоков нет.</p>}
         <h3>Внешние данные и сообщения</h3>
         <p>Статус FACT/CLAIM/HYPOTHESIS присвоен обработчиком источников и не является независимой проверкой истинности.</p>
         {report.observed_data.length === 0 && <p>Новых внешних событий нет.</p>}
@@ -49,24 +53,33 @@ export function AnalysisPanel({ ticks }: { ticks: Tick[] }) {
           <p>Рассмотренные варианты:</p>
           <ul>{(d.options ?? []).map((o, i) => <li key={i}>{labels[o.action ?? ""] ?? o.action ?? "Вариант"}
             {typeof o.expected_utility === "number" ? `; полезность ${o.expected_utility.toFixed(3)}` : ""}
-            {typeof o.risk === "number" ? `; риск ${o.risk.toFixed(3)}` : ""}</li>)}</ul>
+            {typeof o.risk === "number" ? `; риск ${o.risk.toFixed(3)}` : ""}
+            {typeof o.rule_matched === "boolean" ? `; условие ${o.rule_matched ? "выполнено" : "не выполнено"}` : ""}
+            {o.selected ? "; выбран" : ""}</li>)}</ul>
           {!d.options?.length && <p>Альтернативы не записаны.</p>}
         </article>)}
         <h3>Исполненные действия и реакции</h3>
         <ul>{report.actions.map((a, i) => <li key={i}>{a.actor_id}: {labels[String(a.effects?.action)] ?? String(a.effects?.action ?? "действие")} · {a.status}
           {a.effects?.reaction_to_action_id ? `; ответ на ${String(a.effects.reaction_to_action_id)}` : ""}</li>)}</ul>
         <h3>Почему это произошло: записанные механизмы и каскадные эффекты</h3>
-        <ul>{report.why_it_happened.slice(0, 30).map((s, i) => <li key={i}>{s}</li>)}</ul>
-        <p>Перечень эффектов не доказывает полную причинную цепочку. Незаписанные связи с событиями и источниками не достраиваются.</p>
+        <details><summary>Причинные цепочки ({report.causal_chains?.length ?? report.why_it_happened.length})</summary>
+          <ul>{(report.causal_chains?.map(c => c.text) ?? report.why_it_happened).map((s, i) => <li key={i}>{s}</li>)}</ul>
+        </details>
+        <p>Цепочки описывают механизмы модели. Связи с внешними свидетельствами и параметры доступны в техническом отчёте.</p>
         <h3>Альтернативные сценарии</h3>
         {report.alternative_scenarios.length ? report.alternative_scenarios.map((s, i) =>
-          <details key={i}><summary>{s.actor_id}: расчёт альтернатив движком</summary><pre>{JSON.stringify(s.results, null, 2)}</pre></details>)
+          <details key={i}><summary>{s.actor_id}: расчёт альтернатив движком</summary>
+            {s.text?.map((text, j) => <p key={j}>{text}</p>)}
+            {level === "technical" && <pre>{JSON.stringify(s.results, null, 2)}</pre>}</details>)
           : <p>Контрфактическое сравнение не рассчитано.</p>}
       </>}
       <h3>Симуляционный прогноз</h3>
       {report.forecasts.length === 0 && <p>Прогноз для этого тика не рассчитан.</p>}
-      {report.forecasts.slice(0, level === "brief" ? 3 : 30).map((f, i) => <article key={i}>
+      {report.forecasts.slice(0, level === "brief" ? 3 : undefined).map((f, i) => <article key={i}>
         <p>{f.text}</p>{level !== "brief" && <p>Факторы: {(f.drivers ?? []).join(", ")} · модель {f.model_version}</p>}
+        {!!f.comparison?.length && <><p>Изменения прогноза:</p><ul>{f.comparison.map((c, j) => <li key={j}>{c.text}</li>)}</ul></>}
+        <p>{f.comparison_note}</p>
+        {level !== "brief" && <details><summary>Что может изменить прогноз</summary>{f.sensitivity_text?.length ? f.sensitivity_text.map((s, j) => <p key={j}>{s}</p>) : <p>В этом цикле исключение отдельных факторов не изменило вероятность.</p>}</details>}
       </article>)}
       <h3>Ключевые неопределённости</h3><ul>{report.key_uncertainties.map(s => <li key={s}>{s}</li>)}</ul>
       {level === "technical" && <><h3>Структурированный отчёт</h3><pre>{JSON.stringify(report, null, 2)}</pre></>}

@@ -219,7 +219,8 @@ class CrisisGraph:
                             "actors": participants,
                             "confidence": max(0.35, 1.0 - raw["uncertainty"]),
                             "description": f"Secondary crisis generated from {raw['event_type']}",
-                            "metadata": {"crisis_id": branch_id, "parent_crisis_id": cid},
+                            "metadata": {"crisis_id": branch_id, "parent_crisis_id": cid,
+                                "root_event_id": raw["root_event_id"]},
                         })()
                     )
 
