@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from uuid import uuid4
+from dataclasses import asdict
+from .explainability import build_explanation
 
 from sqlalchemy import select
 
@@ -112,6 +114,9 @@ async def run_simulation(
     parent_hash = latest_version.state_hash if latest_version is not None else None
 
     for step in range(1, ticks + 1):
+        state_before_tick = state.snapshot()
+        explanation_effects = []
+        explanation_forecasts = []
         tick = start_tick + step
         state.tick = tick
         changes: dict = {}
@@ -405,6 +410,7 @@ async def run_simulation(
                 for shock in shocks
             )
             cascaded, truncated = CascadeEngine().run(initial_effects, adjacency)
+            explanation_effects.extend(asdict(effect) for effect in cascaded)
             for effect in cascaded:
                 if effect.field == "diplomatic" or effect.field == "trade":
                     state.apply_relationship_delta(effect.source, effect.target, effect.field, effect.delta)
@@ -496,6 +502,7 @@ async def run_simulation(
                     base_rate=actor.values.get("stability", 0.5),
                 )
                 probabilities = prediction["probabilities"]
+                explanation_forecasts.append({**prediction, "model_version": "forecast-v2"})
                 expected = probabilities["low"] * 0.25 + probabilities["medium"] * 0.50 + probabilities["high"] * 0.75
                 uncertainty = prediction["uncertainty"]
                 session.add(ForecastModel(
@@ -531,8 +538,19 @@ async def run_simulation(
         async def snapshot(ctx):
             await sync_world_state_to_db(session, state)
             compaction = compact_world_metadata(state.metadata, current_tick=tick)
-            await persist_tick(session, simulation_id, state, changes, event_ids, ctx.phase_results)
             snapshot_data = state.snapshot()
+            explanation = build_explanation(
+                simulation_id=simulation_id, tick=tick, seed=seed + tick,
+                before=state_before_tick, after=snapshot_data, events=normalized,
+                decisions=ctx.phase_results.get("decision", {}).get("decisions", []),
+                actions=ctx.phase_results.get("action", {}).get("actions", []),
+                effects=explanation_effects, forecasts=explanation_forecasts,
+                parent_hash=parent_hash,
+            )
+            await persist_tick(
+                session, simulation_id, state, changes, event_ids,
+                {**ctx.phase_results, "explanation": explanation}, seed=seed + tick,
+            )
             previous_hash = parent_hash
             snapshot_hash = await save_world_version(
                 session,

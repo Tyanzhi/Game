@@ -65,6 +65,19 @@ async def load_world_state(session, simulation_id, tick=0, seed=0):
         saved_metadata = saved.get("metadata")
         if isinstance(saved_metadata, dict):
             state.metadata = deepcopy(saved_metadata)
+        # A persisted snapshot is authoritative, including an intentionally empty
+        # actor/relationship set. Never merge today's canonical rows into history.
+        saved_actors = saved.get("actors")
+        if not isinstance(saved_actors, dict) or not isinstance(saved_metadata, dict):
+            raise ValueError(f"Incomplete world snapshot: {simulation_id}")
+        for actor_id, values in saved_actors.items():
+            if not isinstance(values, dict):
+                raise ValueError(f"Invalid actor snapshot: {actor_id}")
+            state.actors[actor_id] = ActorState(
+                actor_id,
+                deepcopy({key: value for key, value in values.items() if key != "id"}),
+            )
+        return state
 
     actors = (await session.execute(select(ActorModel).order_by(ActorModel.id))).scalars().all()
     for actor in actors:
@@ -123,10 +136,11 @@ async def sync_world_state_to_db(session, state):
             if field in values:
                 setattr(rel, field, max(-1.0, min(1.0, float(values[field]))))
 
-async def persist_tick(session, simulation_id, state, changes, event_ids, phase):
+async def persist_tick(session, simulation_id, state, changes, event_ids, phase, seed=0):
     session.add(SimulationTickModel(
         simulation_id=simulation_id,
         tick=state.tick,
+        seed=seed,
         event_ids=event_ids or [],
         state_changes=changes or {},
         phase_log=phase or {},

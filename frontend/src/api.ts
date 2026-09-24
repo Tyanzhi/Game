@@ -28,6 +28,29 @@ export type Tick = {
   tick: number;
   state_changes: Record<string, unknown>;
   phase_log: Record<string, unknown>;
+  created_at?: string | null;
+  explanation?: TickExplanation | null;
+};
+
+export type TickExplanation = {
+  version: string;
+  simulation_id: string;
+  tick: number;
+  summary: string;
+  changes: Array<{ text: string }>;
+  observed_data: Array<{
+    event_id: string; description: string; status: string; confidence: number;
+    source_urls: string[]; timestamp: string;
+  }>;
+  actor_decisions: Array<{
+    decision_id: string; text: string; confidence?: number;
+    options?: Array<{ action?: string; expected_utility?: number; risk?: number }>;
+  }>;
+  actions: Array<{ actor_id: string; status: string; effects?: Record<string, unknown> }>;
+  why_it_happened: string[];
+  forecasts: Array<{ text: string; drivers?: string[]; model_version?: string }>;
+  alternative_scenarios: Array<{ actor_id: string; results: unknown }>;
+  key_uncertainties: string[];
 };
 
 export type Relationship = {

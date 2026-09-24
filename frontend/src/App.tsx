@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { AnalysisPanel } from "./AnalysisPanel";
 import {
   Actor,
   ActorDetail,
@@ -1006,6 +1007,7 @@ export default function App() {
         <div className="panel__heading"><div><p className="eyebrow">TIMELINE</p><h2>Tick history</h2></div></div>
         <div className="timeline">{[...ticks].reverse().slice(0,16).map((tick) => <div className="timeline__item" key={tick.tick}><span className="timeline__dot" /><div><strong>TICK {tick.tick}</strong><p>{Object.keys(tick.state_changes ?? {}).length} changed scopes · {Object.keys(tick.phase_log ?? {}).length} phases</p></div></div>)}</div>
       </section>
+      <AnalysisPanel key={selectedSimulation} ticks={ticks} />
     </main>
   );
 }

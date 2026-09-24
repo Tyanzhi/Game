@@ -229,7 +229,9 @@ async def simulation_socket(websocket: WebSocket, simulation_id: str):
 @app.get('/api/simulations/{simulation_id}/ticks')
 async def simulation_ticks(simulation_id: str, db: AsyncSession = Depends(get_db)):
     rows = (await db.execute(select(SimulationTickModel).where(SimulationTickModel.simulation_id == simulation_id).order_by(SimulationTickModel.tick))).scalars().all()
-    return [{'tick': r.tick, 'state_changes': r.state_changes, 'phase_log': r.phase_log} for r in rows]
+    return [{'tick': r.tick, 'state_changes': r.state_changes, 'phase_log': r.phase_log,
+             'created_at': r.created_at.isoformat() if r.created_at else None,
+             'explanation': (r.phase_log or {}).get('explanation')} for r in rows]
 
 @app.get('/api/simulations/{simulation_id}/strategic-overview')
 async def simulation_strategic_overview(simulation_id: str, db: AsyncSession = Depends(get_db)):

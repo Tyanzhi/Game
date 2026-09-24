@@ -395,6 +395,8 @@ async def decide_all(
 
         result.append({
             "decision_id": decision_id,
+            "reasoning_factors": reasoning,
+            "options": options,
             "action_id": action_id,
             "actor_id": actor.id,
             "action": selected["action"],
