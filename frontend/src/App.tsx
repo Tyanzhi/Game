@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { AnalysisPanel } from "./AnalysisPanel";
 import {
   Actor,
   ActorDetail,
@@ -829,6 +830,8 @@ export default function App() {
           <div><span>EFFECTS</span><strong>{causalChain?.effect_count ?? 0}</strong></div>
         </article>
       </section>
+
+      <AnalysisPanel key={selectedSimulation} ticks={ticks} />
 
       <OperationsCenterPanel
         center={operationsCenter}

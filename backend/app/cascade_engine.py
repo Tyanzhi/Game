@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hashlib import sha256
 
 
 @dataclass
@@ -12,6 +13,15 @@ class Effect:
     confidence: float = 1.0
     depth: int = 0
     mechanism: str = "direct"
+    event_id: str | None = None
+    action_id: str | None = None
+    effect_id: str = ""
+    parent_effect_id: str | None = None
+
+    def __post_init__(self):
+        if not self.effect_id:
+            self.effect_id = "effect-" + sha256(repr((self.event_id, self.action_id, self.parent_effect_id,
+                self.source, self.target, self.field, self.delta, self.depth, self.mechanism)).encode()).hexdigest()[:24]
 
 
 class CascadeEngine:
@@ -30,7 +40,7 @@ class CascadeEngine:
 
         while queue:
             effect = queue.pop(0)
-            key = (effect.source, effect.target, effect.field, effect.depth)
+            key = (effect.event_id, effect.action_id, effect.source, effect.target, effect.field, effect.depth)
             if key in visited:
                 continue
             visited.add(key)
@@ -54,6 +64,9 @@ class CascadeEngine:
                     confidence=effect.confidence * self.decay,
                     depth=effect.depth + 1,
                     mechanism="relationship_cascade",
+                    event_id=effect.event_id,
+                    action_id=effect.action_id,
+                    parent_effect_id=effect.effect_id,
                 )
                 if len(output) + len(queue) >= 1000:
                     truncated = True

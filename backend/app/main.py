@@ -207,8 +207,25 @@ async def knowledge_graph():
     return _stage5.graph.export()
 
 @app.post('/api/scenarios/counterfactual')
-async def counterfactual(payload: dict):
-    result = ScenarioEngine().run(payload.get('baseline', {}), payload.get('assumptions', []), payload.get('ticks', 5), payload.get('scenario_id', 'scenario'))
+async def counterfactual(payload: dict, db: AsyncSession = Depends(get_db)):
+    from uuid import uuid4
+    from .realtime_pipeline import save_world_version
+    scenario_id = str(payload.get('scenario_id') or f'scenario-{uuid4().hex}')
+    if await db.get(SimulationRunModel, scenario_id) or await db.get(SimulationRunModel, scenario_id + '-baseline'):
+        raise HTTPException(status_code=409, detail='Scenario already exists; use a new scenario_id')
+    try:
+        result = ScenarioEngine().run(payload.get('baseline', {}), payload.get('assumptions', []), payload.get('ticks', 5), scenario_id, int(payload.get('seed', 0)))
+    except (ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    for branch_id, history in ((scenario_id, result.history), (scenario_id + '-baseline', result.baseline_history)):
+        db.add(SimulationRunModel(id=branch_id, mode='scenario', status='completed', query='counterfactual', ticks=history[-1]['state']['tick']))
+        await db.flush()
+        for item in history:
+            report = item['explanation']
+            db.add(SimulationTickModel(simulation_id=branch_id, tick=report['tick'], seed=report['seed'],
+                state_changes={'changes': report['changes']}, event_ids=[], phase_log={'explanation': report}))
+            await save_world_version(db, branch_id, report['tick'], item['state'], parent_hash=report['parent_hash'], dataset_version='scenario')
+    await db.commit()
     return result.__dict__
 
 @app.websocket('/ws/simulation/{simulation_id}')
@@ -229,7 +246,9 @@ async def simulation_socket(websocket: WebSocket, simulation_id: str):
 @app.get('/api/simulations/{simulation_id}/ticks')
 async def simulation_ticks(simulation_id: str, db: AsyncSession = Depends(get_db)):
     rows = (await db.execute(select(SimulationTickModel).where(SimulationTickModel.simulation_id == simulation_id).order_by(SimulationTickModel.tick))).scalars().all()
-    return [{'tick': r.tick, 'state_changes': r.state_changes, 'phase_log': r.phase_log} for r in rows]
+    return [{'tick': r.tick, 'state_changes': r.state_changes, 'phase_log': r.phase_log,
+             'created_at': r.created_at.isoformat() if r.created_at else None,
+             'explanation': (r.phase_log or {}).get('explanation')} for r in rows]
 
 @app.get('/api/simulations/{simulation_id}/strategic-overview')
 async def simulation_strategic_overview(simulation_id: str, db: AsyncSession = Depends(get_db)):

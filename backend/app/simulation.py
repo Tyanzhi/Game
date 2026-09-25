@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from uuid import uuid4
+from dataclasses import asdict
+from .explainability import build_explanation
 
 from sqlalchemy import select
 
@@ -15,7 +17,7 @@ from .event_engine import normalize
 from .event_propagation import EventPropagation
 from .forecasting_engine import forecast
 from .integration_state import load_world_state, persist_tick, sync_world_state_to_db
-from .models import ActorPerceptionModel, EffectModel, ForecastModel, SimulationRunModel, WorldStateVersionModel
+from .models import ActorPerceptionModel, EffectModel, ForecastModel, SimulationRunModel, SimulationTickModel, WorldStateVersionModel
 from .perception_engine import PerceptionEngine
 from .reaction_engine import plan_reactions
 from .realtime_pipeline import save_world_version
@@ -56,11 +58,11 @@ def _action_effects_to_initial_effects(actions: list[dict]) -> list[Effect]:
         for key, field in _ACTION_EFFECT_FIELDS.items():
             delta = action_effects.get(key)
             if isinstance(delta, (int, float)) and delta:
-                initial.append(Effect(source=str(actor_id), target=str(actor_id), field=field, delta=float(delta), mechanism="action"))
+                initial.append(Effect(source=str(actor_id), target=str(actor_id), field=field, delta=float(delta), mechanism="action", action_id=action.get("action_id")))
         diplomatic_delta = action_effects.get("diplomatic_delta")
         target_actor_id = action_effects.get("target_actor_id")
         if isinstance(diplomatic_delta, (int, float)) and diplomatic_delta and target_actor_id:
-            initial.append(Effect(source=str(actor_id), target=str(target_actor_id), field="diplomatic", delta=float(diplomatic_delta), mechanism="diplomatic_action"))
+            initial.append(Effect(source=str(actor_id), target=str(target_actor_id), field="diplomatic", delta=float(diplomatic_delta), mechanism="diplomatic_action", action_id=action.get("action_id")))
     return initial
 
 
@@ -73,6 +75,10 @@ async def run_simulation(
     broadcast=None,
     controlled_actor_id: str | None = None,
     mode: str = "simulation",
+    initial_state=None,
+    player_actions=None,
+    parent_simulation_id=None,
+    disable_ai=False,
 ):
     ticks = max(1, min(120, int(ticks)))
     simulation_id = simulation_id or f"sim-{uuid4().hex}"
@@ -92,7 +98,7 @@ async def run_simulation(
         run.mode = mode
         run.finished_at = None
 
-    state = await load_world_state(session, simulation_id, 0, seed)
+    state = initial_state if initial_state is not None else await load_world_state(session, simulation_id, 0, seed)
     start_tick = int(state.tick)
 
     latest_version = (
@@ -110,8 +116,20 @@ async def run_simulation(
     new_events, duplicate_events = await persist_events(session, normalized)
     history = []
     parent_hash = latest_version.state_hash if latest_version is not None else None
+    previous_tick = (await session.execute(select(SimulationTickModel)
+        .where(SimulationTickModel.simulation_id == (parent_simulation_id or simulation_id))
+        .order_by(SimulationTickModel.tick.desc()).limit(1))).scalar_one_or_none()
+    previous_report = (previous_tick.phase_log or {}).get("explanation") if previous_tick else None
+    if initial_state is not None and parent_simulation_id:
+        from .realtime_pipeline import state_hash
+        parent_hash = state_hash(state.snapshot())
 
     for step in range(1, ticks + 1):
+        state_before_tick = state.snapshot()
+        explanation_effects = []
+        explanation_forecasts = []
+        explanation_events = list(normalized)
+        explanation_decisions = []
         tick = start_tick + step
         state.tick = tick
         changes: dict = {}
@@ -132,6 +150,9 @@ async def run_simulation(
                 delta = float(effect["delta"])
                 state.apply_delta(target, field, delta)
                 changes.setdefault(target, {})[field] = changes.setdefault(target, {}).get(field, 0.0) + delta
+                explanation_effects.append(asdict(Effect(source=str(effect.get("source", target)),
+                    target=target, field=field, delta=delta, mechanism="delayed_effect",
+                    action_id=effect.get("source_action_id"))))
 
             result = {
                 "tick": state.tick,
@@ -155,7 +176,7 @@ async def run_simulation(
             await publish("perception", result)
             return result
         async def decision(ctx):
-            decisions = await decide_all(
+            decisions = [] if disable_ai else await decide_all(
                 session,
                 simulation_id,
                 state.metadata,
@@ -207,6 +228,10 @@ async def run_simulation(
                 if bargain.accepted:
                     state.apply_relationship_delta(actor_a, actor_b, "diplomatic", 0.01)
                     state.apply_relationship_delta(actor_b, actor_a, "diplomatic", 0.01)
+                    for source, target, decision_row in ((actor_a, actor_b, item), (actor_b, actor_a, other)):
+                        explanation_effects.append(asdict(Effect(source=source, target=target,
+                            field="diplomatic", delta=0.01, mechanism="accepted_bargain",
+                            action_id=decision_row["action_id"])))
 
             reliable_multilateral = [
                 assess_multilateral_reliability(
@@ -268,6 +293,13 @@ async def run_simulation(
         async def action(ctx):
             decisions = ctx.phase_results["decision"].get("decisions", [])
             primary_actions = await execute_actions(session, [item["action_id"] for item in decisions])
+            if step == 1:
+                primary_actions = list(player_actions or []) + primary_actions
+                for player in player_actions or []:
+                    explanation_decisions.append({"decision_id": player.get("decision_id"),
+                        "actor_id": player["actor_id"], "action_id": player["action_id"],
+                        "action": player.get("effects", {}).get("action"), "control_source": "player",
+                        "reasoning_factors": ["player_selected"], "options": []})
 
             reactions, shocks = await plan_reactions(
                 session,
@@ -276,6 +308,7 @@ async def run_simulation(
                 seed + tick,
             )
             reaction_actions = []
+            explanation_decisions.extend(reactions)
             if reactions:
                 reaction_actions = await execute_actions(
                     session,
@@ -372,6 +405,7 @@ async def run_simulation(
                 seed,
             )
             all_events = list(normalized) + secondary_events
+            explanation_events.extend(secondary_events)
             propagated_events = propagation.propagate(
                 all_events,
                 actor_values,
@@ -389,6 +423,8 @@ async def run_simulation(
                     confidence=effect.confidence,
                     depth=effect.depth,
                     mechanism=effect.mechanism,
+                    event_id=effect.event_id, effect_id=effect.effect_id,
+                    parent_effect_id=effect.parent_effect_id,
                 )
                 for effect in propagated_events
             )
@@ -401,10 +437,12 @@ async def run_simulation(
                     confidence=float(shock.get("confidence", 1.0)),
                     depth=int(shock.get("depth", 0)),
                     mechanism=str(shock.get("mechanism", "unexpected_shock")),
+                    event_id=f"shock:{simulation_id}:{tick}",
                 )
                 for shock in shocks
             )
             cascaded, truncated = CascadeEngine().run(initial_effects, adjacency)
+            explanation_effects.extend(asdict(effect) for effect in cascaded)
             for effect in cascaded:
                 if effect.field == "diplomatic" or effect.field == "trade":
                     state.apply_relationship_delta(effect.source, effect.target, effect.field, effect.delta)
@@ -496,6 +534,38 @@ async def run_simulation(
                     base_rate=actor.values.get("stability", 0.5),
                 )
                 probabilities = prediction["probabilities"]
+                previous_prediction = next((f for f in (previous_report or {}).get("forecasts", [])
+                    if f.get("target") == prediction["target"] and f.get("model_version") == prediction["model_version"]
+                    and f.get("horizon") == prediction["horizon"]), None)
+                attribution = []
+                if previous_prediction and all(k in previous_prediction for k in ("inputs", "driver_values", "seed")):
+                    old_inputs = previous_prediction["inputs"]
+                    old_drivers = dict(previous_prediction["driver_values"])
+                    old_seed = previous_prediction["seed"]
+                    last_probabilities = previous_prediction["probabilities"]
+                    scenarios = [("state", actor.values, dict(old_drivers), old_seed)]
+                    for name, value in drivers.items():
+                        old_drivers[name] = value
+                        scenarios.append((name, actor.values, dict(old_drivers), old_seed))
+                    scenarios.append(("seed", actor.values, dict(drivers), seed + tick))
+                    for factor, inputs, scenario_drivers, scenario_seed in scenarios:
+                        evaluated = forecast(prediction["target"], inputs, scenario_drivers, 5, scenario_seed,
+                            base_rate=inputs.get("stability", 0.5))["probabilities"]
+                        attribution.append({"factor": factor, "probability_deltas": {
+                            key: evaluated[key] - last_probabilities[key] for key in evaluated}})
+                        last_probabilities = evaluated
+                sensitivity = []
+                for name, value in drivers.items():
+                    alternative = forecast(f"{actor_id}:stability", actor.values,
+                        {**drivers, name: 0.0}, 5, seed + tick, base_rate=actor.values.get("stability", 0.5))
+                    sensitivity.append({"factor": name, "value": value,
+                        "high_probability_without_factor": alternative["probabilities"]["high"],
+                        "high_probability_delta": alternative["probabilities"]["high"] - probabilities["high"]})
+                explanation_forecasts.append({**prediction, "driver_values": dict(drivers),
+                    "change_attribution": attribution,
+                    "sensitivity": sensitivity, "inputs": dict(actor.values), "seed": seed + tick,
+                    "confidence": max(0.0, 1.0 - prediction["uncertainty"]),
+                    "model_version": "forecast-v2"})
                 expected = probabilities["low"] * 0.25 + probabilities["medium"] * 0.50 + probabilities["high"] * 0.75
                 uncertainty = prediction["uncertainty"]
                 session.add(ForecastModel(
@@ -531,8 +601,20 @@ async def run_simulation(
         async def snapshot(ctx):
             await sync_world_state_to_db(session, state)
             compaction = compact_world_metadata(state.metadata, current_tick=tick)
-            await persist_tick(session, simulation_id, state, changes, event_ids, ctx.phase_results)
             snapshot_data = state.snapshot()
+            explanation = build_explanation(
+                simulation_id=simulation_id, tick=tick, seed=seed + tick,
+                before=state_before_tick, after=snapshot_data, events=explanation_events,
+                decisions=ctx.phase_results.get("decision", {}).get("decisions", []) + explanation_decisions,
+                actions=ctx.phase_results.get("action", {}).get("actions", []),
+                effects=explanation_effects, forecasts=explanation_forecasts,
+                parent_hash=parent_hash,
+                previous_report=previous_report, phase_results=ctx.phase_results,
+            )
+            await persist_tick(
+                session, simulation_id, state, changes, event_ids,
+                {**ctx.phase_results, "explanation": explanation}, seed=seed + tick,
+            )
             previous_hash = parent_hash
             snapshot_hash = await save_world_version(
                 session,
@@ -543,6 +625,7 @@ async def run_simulation(
                 dataset_version="live",
             )
             ctx.payload["snapshot_hash"] = snapshot_hash
+            ctx.payload["explanation"] = explanation
             result = {
                 "state_hash": snapshot_hash,
                 "parent_hash": previous_hash,
@@ -553,6 +636,7 @@ async def run_simulation(
         engine = SimulationTickEngine({"ingest": ingest, "state_update": state_update, "perception": perception, "decision": decision, "interaction": interaction, "action": action, "cascade": cascade, "forecast": forecast_phase, "snapshot": snapshot})
         completed = await engine.run(context)
         phase_data = completed.phase_results
+        previous_report = completed.payload["explanation"]
         parent_hash = phase_data["snapshot"]["state_hash"]
         snapshot_data = state.snapshot()
         history.append(snapshot_data)

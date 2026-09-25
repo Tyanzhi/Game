@@ -758,3 +758,9 @@ input,select { width:100%; color:#e6f0ff; background:#07111e; border:1px solid #
 @media (max-width:780px) {
   .alert-kpis { grid-template-columns:1fr 1fr; }
 }
+:root .analysis-panel { margin-top: 24px; }
+.analysis-controls { display: flex; flex-wrap: wrap; gap: 16px; margin: 16px 0; }
+.analysis-controls label { display: flex; align-items: center; gap: 8px; }
+.analysis-panel p, .analysis-panel li { line-height: 1.6; overflow-wrap: anywhere; }
+.analysis-panel h3 { margin-top: 24px; }
+.analysis-panel pre { max-height: 480px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }

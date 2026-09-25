@@ -18,6 +18,12 @@ class PropagationEffect:
     perception: float
     depth: int = 0
     parent_event_id: str | None = None
+    parent_effect_id: str | None = None
+
+    @property
+    def effect_id(self):
+        return "event-effect-" + hashlib.sha256(repr((self.event_id, self.source, self.target,
+            self.field, self.depth, self.parent_effect_id)).encode()).hexdigest()[:24]
 
 
 @dataclass
@@ -121,7 +127,7 @@ class EventPropagation:
                 next_effect = PropagationEffect(
                     effect.event_id, effect.target, actor_id, effect.domain, effect.field,
                     propagated * (0.7 + min(link, 1.0) * 0.3), confidence,
-                    "network_propagation", effect.perception * 0.8, effect.depth + 1, effect.event_id
+                    "network_propagation", effect.perception * 0.8, effect.depth + 1, effect.event_id, effect.effect_id
                 )
                 queue.append((next_effect, involved))
         return output
