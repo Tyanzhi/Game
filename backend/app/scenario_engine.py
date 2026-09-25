@@ -78,6 +78,8 @@ class ScenarioEngine:
                     "text": f"{base['target']}: высокая стабильность без вмешательства {old:.1%}, при заданных условиях {new:.1%} ({(new-old)*100:+.2f} п.п.)."})
             right["explanation"]["alternative_scenarios"] = [{"actor_id": "scenario", "results": comparison,
                 "text": [c["text"] for c in comparison], "category": "MODEL_COUNTERFACTUAL"}]
+            right["explanation"]["key_uncertainties"] = [message for message in right["explanation"]["key_uncertainties"]
+                if message != "Контрфактическое сравнение для этого тика не рассчитано."]
             comparisons.append({"tick": right["state"]["tick"], "forecasts": comparison})
         return ScenarioResult(scenario_id, history, control, comparisons)
 

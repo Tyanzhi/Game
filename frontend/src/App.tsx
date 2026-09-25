@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { AnalysisPanel } from "./AnalysisPanel";
 import {
   Actor,
@@ -585,6 +585,9 @@ export default function App() {
   const [scenarioTree, setScenarioTree] = useState<ScenarioTree | null>(null);
   const [causalChain, setCausalChain] = useState<CausalChain | null>(null);
   const [selectedSimulation, setSelectedSimulation] = useState("");
+  const activeSimulation = useRef(selectedSimulation);
+  activeSimulation.current = selectedSimulation;
+  const [loadedSimulation, setLoadedSimulation] = useState("");
   const [selectedActor, setSelectedActor] = useState("");
   const [selectedCrisis, setSelectedCrisis] = useState("");
   const [engineStatus, setEngineStatus] = useState("connecting");
@@ -613,7 +616,7 @@ export default function App() {
       setEngineStatus(health.status);
       setSimulations(simulationRows);
       if (health.live_intelligence) setLiveStatus(health.live_intelligence);
-      if (!selectedSimulation && simulationRows[0]) setSelectedSimulation(simulationRows[0].id);
+      if (simulationRows[0]) setSelectedSimulation(current => current || simulationRows[0].id);
     } catch (err) {
       setEngineStatus("offline");
       setError(err instanceof Error ? err.message : "API unavailable");
@@ -639,6 +642,8 @@ export default function App() {
       api.predictionCenter(simulationId),
       api.operationsCenter(simulationId)
     ]);
+    if (activeSimulation.current !== simulationId) return;
+    setLoadedSimulation(simulationId);
     setTicks(tickRows);
     setOverview(strategic);
     setCausalChain(chain);
@@ -660,6 +665,11 @@ export default function App() {
 
   useEffect(() => {
     if (!selectedSimulation) return;
+    setTicks([]);
+    setOverview(null);
+    setCausalChain(null);
+    setPredictionCenter(null);
+    setOperationsCenter(null);
     refreshSimulation(selectedSimulation).catch((err) =>
       setError(err instanceof Error ? err.message : "Failed to load strategic state")
     );
@@ -831,7 +841,7 @@ export default function App() {
         </article>
       </section>
 
-      <AnalysisPanel key={selectedSimulation} ticks={ticks} />
+      <AnalysisPanel key={selectedSimulation} ticks={loadedSimulation === selectedSimulation ? ticks : []} />
 
       <OperationsCenterPanel
         center={operationsCenter}
