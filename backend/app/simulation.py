@@ -534,6 +534,26 @@ async def run_simulation(
                     base_rate=actor.values.get("stability", 0.5),
                 )
                 probabilities = prediction["probabilities"]
+                previous_prediction = next((f for f in (previous_report or {}).get("forecasts", [])
+                    if f.get("target") == prediction["target"] and f.get("model_version") == prediction["model_version"]
+                    and f.get("horizon") == prediction["horizon"]), None)
+                attribution = []
+                if previous_prediction and all(k in previous_prediction for k in ("inputs", "driver_values", "seed")):
+                    old_inputs = previous_prediction["inputs"]
+                    old_drivers = dict(previous_prediction["driver_values"])
+                    old_seed = previous_prediction["seed"]
+                    last_probabilities = previous_prediction["probabilities"]
+                    scenarios = [("state", actor.values, dict(old_drivers), old_seed)]
+                    for name, value in drivers.items():
+                        old_drivers[name] = value
+                        scenarios.append((name, actor.values, dict(old_drivers), old_seed))
+                    scenarios.append(("seed", actor.values, dict(drivers), seed + tick))
+                    for factor, inputs, scenario_drivers, scenario_seed in scenarios:
+                        evaluated = forecast(prediction["target"], inputs, scenario_drivers, 5, scenario_seed,
+                            base_rate=inputs.get("stability", 0.5))["probabilities"]
+                        attribution.append({"factor": factor, "probability_deltas": {
+                            key: evaluated[key] - last_probabilities[key] for key in evaluated}})
+                        last_probabilities = evaluated
                 sensitivity = []
                 for name, value in drivers.items():
                     alternative = forecast(f"{actor_id}:stability", actor.values,
@@ -542,6 +562,7 @@ async def run_simulation(
                         "high_probability_without_factor": alternative["probabilities"]["high"],
                         "high_probability_delta": alternative["probabilities"]["high"] - probabilities["high"]})
                 explanation_forecasts.append({**prediction, "driver_values": dict(drivers),
+                    "change_attribution": attribution,
                     "sensitivity": sensitivity, "inputs": dict(actor.values), "seed": seed + tick,
                     "confidence": max(0.0, 1.0 - prediction["uncertainty"]),
                     "model_version": "forecast-v2"})

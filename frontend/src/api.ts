@@ -52,7 +52,7 @@ export type TickExplanation = {
   actions: Array<{ actor_id: string; status: string; effects?: Record<string, unknown> }>;
   why_it_happened: string[];
   forecasts: Array<{ text: string; drivers?: string[]; model_version?: string;
-    comparison?: Array<{ text: string }>; comparison_note?: string; sensitivity_text?: string[] }>;
+    comparison?: Array<{ text: string }>; comparison_note?: string; sensitivity_text?: string[]; change_explanation?: string[] }>;
   alternative_scenarios: Array<{ actor_id: string; results: unknown; text?: string[] }>;
   key_uncertainties: string[];
 };

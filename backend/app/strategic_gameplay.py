@@ -269,6 +269,11 @@ async def submit_player_action(
         if target_actor_id == actor_id:
             raise ValueError("Target actor must differ from source actor")
 
+    from .integration_state import load_world_state
+    before_action = await load_world_state(session, simulation_id)
+    if actor_id not in before_action.actors or (target_actor_id and target_actor_id not in before_action.actors):
+        raise ValueError("Actor is absent from this simulation snapshot")
+
     latest_tick = (
         await session.execute(
             select(SimulationTickModel)
@@ -315,8 +320,6 @@ async def submit_player_action(
     session.add(action)
     await session.flush()
 
-    from .integration_state import load_world_state
-    before_action = await load_world_state(session, simulation_id)
     result = await execute_action(session, action_id)
     if explain:
         from .simulation import run_simulation

@@ -82,6 +82,12 @@ def build_explanation(*, simulation_id, tick, seed, before, after, events, decis
             f"{row['actor_id']}: {ACTIONS.get(choice, choice)}. "
             + ("Причины: " + "; ".join(reason_text(reason) for reason in reasons) + "." if reasons
                else "Причины выбора не записаны; объяснение отсутствует.")})
+        plan = row.get("information_state", {}).get("strategic_plan", {})
+        selected_plan = next((p for p in plan.get("aggregate", []) if p.get("action") == choice), None)
+        if selected_plan:
+            decision_texts[-1]["text"] += (f" Планировщик выбрал максимальную итоговую оценку "
+                f"{selected_plan['planning_score']:.3f} на горизонтах {plan.get('horizons', [])}. "
+                "Оценка учитывает полезность, риск, взаимодействия и ограничения ресурсов.")
     forecast_texts = []
     for row in forecasts:
         probabilities = row.get("probabilities", {})
@@ -109,6 +115,9 @@ def build_explanation(*, simulation_id, tick, seed, before, after, events, decis
             "confidence": confidence, "confidence_label": confidence_label,
             "comparison": comparisons, "previous_tick": (previous_report or {}).get("tick") if previous else None,
             "driver_changes": driver_changes, "sensitivity_text": factor_text,
+            "change_explanation": [f"{DRIVERS.get(a['factor'], a['factor'])}: вклад в изменение вероятности высокой стабильности "
+                f"{a['probability_deltas']['high'] * 100:+.2f} п.п."
+                for a in row.get("change_attribution", []) if abs(a["probability_deltas"]["high"]) > 1e-12],
             "comparison_note": "Сравниваются скользящие горизонты одинаковой длины; дата исхода смещается на один тик." if previous else "Предыдущего сопоставимого прогноза нет.",
             "text":
             f"{row['target']}, горизонт {row['horizon']} тиков: {distribution or 'распределение не записано'}. "
@@ -204,13 +213,26 @@ def build_explanation(*, simulation_id, tick, seed, before, after, events, decis
 
 LEVELS = {"low": "низкая стабильность", "medium": "средняя стабильность", "high": "высокая стабильность"}
 DRIVERS = {"economic": "экономические изменения", "social": "внутреннее давление",
-    "crisis": "интенсивность кризиса", "financial_stress": "финансовое напряжение", "global_trade": "мировая торговля"}
+    "crisis": "интенсивность кризиса", "financial_stress": "финансовое напряжение", "global_trade": "мировая торговля",
+    "state": "изменение исходного состояния", "seed": "детерминированный шум нового тика"}
 MECHANISMS = {"action": "прямой эффект действия", "diplomatic_action": "дипломатическое действие",
+    "scenario_assumption": "заданное пользователем условие сценария",
     "relationship_cascade": "распространение по отношениям", "event_propagation": "воздействие события",
     "network_propagation": "сетевое распространение", "market_propagation": "воздействие на рынок",
     "delayed_effect": "отложенное последствие", "accepted_bargain": "принятое соглашение",
     "unexpected_shock": "случайный шок модели", "shock_secondary_effect": "вторичный эффект шока"}
 REASONS = {"player_selected": "решение выбрано пользователем; его личные мотивы модель не оценивает",
+    "elevated threat perception": "оценка угрозы превышает 0,55",
+    "high domestic pressure": "внутреннее давление превышает 0,55",
+    "economic stress signal": "экономический стресс превышает 0,55",
+    "strained relationship": "оценка дипломатических отношений ниже −0,25",
+    "baseline_interaction": "учтено влияние текущих отношений на оценку вариантов",
+    "security_dilemma": "взаимное усиление оборонных позиций снижает полезность обеих сторон",
+    "deterrence_and_bargaining": "учтено взаимодействие оборонной позиции и дипломатического контакта",
+    "mutual_bargaining": "взаимная дипломатия повышает расчётную полезность сотрудничества",
+    "economic_coordination": "экономическая координация повышает полезность выбранных мер",
+    "signaling": "учтены издержки взаимных публичных сигналов",
+    "information_asymmetry": "учтён эффект неравномерной информированности",
     "intelligence_uncertainty_response": "информационный сигнал при качестве информации ниже 0,55",
     "security_threshold_response": "сигнал безопасности или превышение порога угрозы",
     "economic_pressure_response": "экономический сигнал при экономическом потенциале выше 0,25",
@@ -221,6 +243,12 @@ REASONS = {"player_selected": "решение выбрано пользоват�
 
 
 def reason_text(reason):
+    if str(reason).startswith("strategic_posture:"):
+        posture = str(reason).split(":", 1)[1]
+        return "стратегическая позиция: " + {"information_gathering": "сбор информации", "containment": "сдерживание кризиса",
+            "cooperative_mediation": "посредничество", "diversion": "перенос внимания с внутреннего давления",
+            "opportunistic_leverage": "использование внешнего кризиса", "resilience": "устойчивость",
+            "deterrence": "сдерживание угроз", "signaling": "подача сигнала"}.get(posture, posture)
     return REASONS.get(str(reason), str(reason).replace("_", " "))
 
 

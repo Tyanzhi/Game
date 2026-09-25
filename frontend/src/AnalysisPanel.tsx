@@ -79,6 +79,7 @@ export function AnalysisPanel({ ticks }: { ticks: Tick[] }) {
         <p>{f.text}</p>{level !== "brief" && <p>Факторы: {(f.drivers ?? []).join(", ")} · модель {f.model_version}</p>}
         {!!f.comparison?.length && <><p>Изменения прогноза:</p><ul>{f.comparison.map((c, j) => <li key={j}>{c.text}</li>)}</ul></>}
         <p>{f.comparison_note}</p>
+        {level !== "brief" && !!f.change_explanation?.length && <><p>Причины изменения прогноза (последовательный пересчёт входов модели):</p><ul>{f.change_explanation.map((s, j) => <li key={j}>{s}</li>)}</ul></>}
         {level !== "brief" && <details><summary>Что может изменить прогноз</summary>{f.sensitivity_text?.length ? f.sensitivity_text.map((s, j) => <p key={j}>{s}</p>) : <p>В этом цикле исключение отдельных факторов не изменило вероятность.</p>}</details>}
       </article>)}
       <h3>Ключевые неопределённости</h3><ul>{report.key_uncertainties.map(s => <li key={s}>{s}</li>)}</ul>

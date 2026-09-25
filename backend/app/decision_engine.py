@@ -224,6 +224,13 @@ async def decide_all(
 
             options.append({
                 "action": action,
+                "scoring_inputs": {"actor": dict(actor_state), "threat": threat,
+                    "pressure": pressure, "economic_signal": economic_signal,
+                    "relationship": relationship, "memory": dict(memory), "belief": dict(belief)},
+                "base_utility": utility,
+                "risk_penalty": risk * (1.0 - float(actor.risk_tolerance)),
+                "theory_adjustment": theory_adjustment(action, theory),
+                "context_adjustment": score - utility + risk * (1.0 - float(actor.risk_tolerance)) - theory_adjustment(action, theory),
                 "expected_utility": _clamp(score),
                 "risk": risk,
                 "rationale": list(rationale),
@@ -330,6 +337,8 @@ async def decide_all(
             reasoning = ["bounded_rationality_baseline"]
 
         information_state = {
+            "model_version": "decision-v2",
+            "selected_inputs": selected.get("scoring_inputs", {}),
             "target_actor_id": target_actor_id,
             "markets": dict(markets),
             "crisis_intensity": selected.get("crisis_intensity", 0.0),

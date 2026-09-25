@@ -55,6 +55,8 @@ async def test_gameplay_services_cover_actor_crisis_scenario_action_and_causal_c
                             "nodes": {
                                 "crisis-1": {
                                     "event_type": "economic_crisis",
+                                    "tick_started": 3,
+                                    "root_event_id": "external-crisis-1",
                                     "phase": "escalating",
                                     "intensity": 0.65,
                                     "participants": ["usa", "chn"],
@@ -87,6 +89,15 @@ async def test_gameplay_services_cover_actor_crisis_scenario_action_and_causal_c
                 },
             ),
         ])
+        await session.commit()
+
+        # Player actions now advance a full tick: provide a complete executable
+        # snapshot rather than the former read-only overview fixture.
+        from app.integration_state import TRACKED_FIELDS
+        version = (await session.execute(select(WorldStateVersionModel))).scalar_one()
+        actor_rows = (await session.execute(select(ActorModel))).scalars().all()
+        version.state_json = {**version.state_json, "actors": {
+            a.id: {field: getattr(a, field) for field in TRACKED_FIELDS} for a in actor_rows}}
         await session.commit()
 
         detail = await actor_detail(session, "sim-game", "usa")

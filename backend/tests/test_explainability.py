@@ -57,6 +57,10 @@ async def test_each_tick_persists_report_with_matching_state_hash_and_seed():
             second = ticks[1].phase_log["explanation"]
             assert second["forecasts"][0]["comparison"]
             assert second["forecasts"][0]["sensitivity"]
+            for forecast in second["forecasts"]:
+                for comparison in forecast["comparison"]:
+                    explained = sum(a["probability_deltas"][comparison["outcome"]] for a in forecast["change_attribution"])
+                    assert explained == pytest.approx(comparison["delta"], abs=1e-12)
             assert second["causal_chains"]
             assert second["unexplained_changes"] == []
             effect_ids = {e["effect_id"] for e in second["cascade_effects"]}
@@ -82,6 +86,22 @@ def test_cascade_preserves_independent_origins_and_parent_links():
     by_id = {e.effect_id: e for e in effects}
     for effect in effects[2:]:
         assert by_id[effect.parent_effect_id].action_id == effect.action_id
+
+
+def test_counterfactual_is_isolated_and_probabilities_are_computed():
+    from app.scenario_engine import ScenarioEngine
+    baseline = {"tick": 3, "actors": {"A": {"stability": 0.7}}, "metadata": {}}
+    original = deepcopy(baseline)
+    result = ScenarioEngine().run(baseline, [{"actor_id": "A", "field": "stability", "delta": -0.2}], 2, "case", 7)
+    assert baseline == original
+    assert result.baseline_history[0]["state"]["actors"]["A"]["stability"] == 0.7
+    assert result.history[0]["state"]["actors"]["A"]["stability"] == pytest.approx(0.5)
+    assert result.comparisons[0]["forecasts"][0]["delta"] < 0
+    assert result.history[0]["explanation"]["alternative_scenarios"]
+    assert result.history[0]["explanation"]["unexplained_changes"] == []
+    assert result == ScenarioEngine().run(baseline, [{"actor_id": "A", "field": "stability", "delta": -0.2}], 2, "case", 7)
+    with pytest.raises(ValueError):
+        ScenarioEngine().run(baseline, [{"actor_id": "A", "field": "stability", "delta": float("nan")}])
 
 
 @pytest.mark.asyncio
