@@ -21,6 +21,10 @@ WORLD ENGINE is a browser-based living-world simulation combining real-world dat
 
 The LLM is not the authoritative world-state engine. Structured state, deterministic rules, validation, and simulation control the world. AI interprets evidence and proposes decisions that must pass validation before execution.
 
+## Engineering standard
+
+Codex instructions are in [AGENTS.md](AGENTS.md). The complete [Engineering Constitution](docs/ENGINEERING_CONSTITUTION.md) records Stage 8 priorities, invariants and acceptance criteria. Its audit observations are dated; verify the current state of the code and deployments before acting on them.
+
 ## Development
 
 The first vertical slice is:
