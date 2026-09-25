@@ -5,6 +5,8 @@
 
 [build.environment]
   NODE_VERSION = "24"
+  VITE_API_URL = "https://api-production-4632.up.railway.app"
+  VITE_WS_URL = "wss://api-production-4632.up.railway.app"
 
 [[headers]]
   for = "/*"
