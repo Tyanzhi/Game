@@ -1,51 +1,30 @@
-# Explainability is an architectural requirement
+# Explainability contract (v2)
 
-Every significant simulation result must have an explanation derived from recorded
-engine inputs and outputs. An LLM must not invent post-hoc causes. This requirement
-applies to manual simulations, live cycles, player turns and future scenario branches.
+Every persisted simulation tick carries `phase_log.explanation`, generated deterministically from recorded engine data. No LLM is used. Tick APIs expose the report and the UI offers Russian brief, analytical and technical views beside simulation controls.
 
-## Implemented first slice
+## Recorded information
 
-`app/explainability.py` builds deterministic Russian text and structured records.
-The simulation captures the before-state, primary decisions and alternatives,
-executed actions/reactions, cascade effects, normalized evidence and forecasts.
-The snapshot phase stores the report transactionally in
-`SimulationTickModel.phase_log.explanation`. The tick API exposes it as `explanation`;
-no schema migration or historical backfill is needed. Before/after hashes use the
-same algorithm as saved world versions. The report does not mutate world state.
+- Before/after snapshots and hashes, tick seed, parent hash and model versions.
+- External FACT/CLAIM/HYPOTHESIS evidence with source IDs, URLs and timestamps, separated from generated crises, random shocks and forecasts.
+- Primary and reaction decisions, actual selection factors, input values, alternatives, resource feasibility, utility/risk components and multi-horizon planning results. Player choices are explicitly attributed to the user; motives are not invented.
+- Event/action IDs and parent effect IDs through event and relationship propagation. Delayed effects retain their originating action. Accepted bargaining effects are recorded. Independent origins are not deduplicated together.
+- Numeric actor, relationship and market deltas with contributing effects and a residual check. Unrecorded contributions are explicitly flagged. Metadata before/after records retain crisis graph, belief, memory and scheduling changes.
+- Forecast probability distributions, separate heuristic confidence, uncertainty, ensemble output and inputs. Matching targets/models/horizons compare to the preceding persisted tick, including after restart. These are rolling horizons, not the same outcome date.
+- Sequential recalculation attributes probability drift to state, each driver and seed; contributions sum to the observed probability change. Leave-one-driver-out calculations show sensitivity with other inputs and seed held fixed.
+- Readable planning counterfactuals report utility/risk differences, not fabricated event probabilities.
 
-The World Engine Analysis panel supports tick selection and brief, analytical and
-technical detail. It distinguishes external FACT/CLAIM/HYPOTHESIS records from
-model decisions and forecasts. Old ticks without reports are explicitly labeled.
-Reports retain full details; the UI caps long lists and exposes the full technical
-record. Forecast horizon, uncertainty, model version and available drivers are shown.
+## Isolated intervention scenarios
 
-## Required follow-up, not claimed complete
+`POST /api/scenarios/counterfactual` accepts `baseline` with `actors`, optional `metadata` and `tick`, `assumptions` containing `{actor_id, field, delta}`, `ticks`, `seed` and optional unique `scenario_id`. It calculates control and intervention copies with identical seeds, cascade rules and forecast models. Both histories and explanations are persisted as separate runs and appear in the simulation picker. No canonical actors are mutated by this endpoint. Duplicate IDs return 409; invalid assumptions return 422.
 
-- Propagate evidence/event/action IDs through every effect and retain parent effect
-  IDs across cascades and compaction. A list of effects is not a complete causal graph.
-- Record explanation inputs for player actions and reaction decisions as completely
-  as primary AI decisions, including alternatives and constraints.
-- Translate every internal rationale/factor code into human-readable, versioned text.
-- Provide readable counterfactual comparisons from isolated ScenarioEngine branches.
-  Current planning comparisons are heuristic utility/risk deltas, not measured
-  changes in real-world event probabilities.
-- Compare forecasts at matching targets/horizons across ticks and distinguish
-  forecast drift from realized outcome changes.
-- Persist evidence cutoff, freshness, source health, all model versions and the run
-  manifest. Explicitly describe missing information and computed sensitivity drivers.
-- Cover created/deleted entities, queued delayed effects, all domain engines and
-  temporal graph changes. Numeric deltas alone cannot cover those cases.
-- Verify all output remains bound to its branch after Stage 8 isolation work.
+This intervention model does not simulate fresh actor decisions or ingest new external events. Reports state that boundary. Planning comparisons and intervention comparisons are different kinds of counterfactual evidence and are labeled accordingly.
 
-## Acceptance
+## Coverage and limitations
 
-Each report must answer what happened, recorded reasons, actors and choices,
-alternatives, consequences, likely scenarios and conditions that could change them.
-Store provenance, before/after values, confidence separate from probability,
-uncertainty and model versions. Unsupported sections state their limitations.
-No API route, passing smoke test or fluent text establishes scientific validity.
+Reports cover normal simulation runs, live cycles using `run_simulation`, direct player actions, player turns and intervention scenarios. Player turns inherit the parent snapshot and tick number; parent snapshot content remains immutable. Historical reports are not fabricated for old ticks.
 
-Tests cover deterministic output, input immutability, preservation of CLAIM status,
-absence of invented causes and per-tick persistence/hash/seed integrity. Full CI and
-browser verification are required before production release.
+The legacy in-memory `/api/events` and `/api/world/state` interfaces are separate from persisted simulations and remain a Stage 8 consolidation task. Full isolation of normal decisions/actions from canonical ORM rows, a comprehensive run manifest and scientific calibration remain separate architecture work. Explainability does not establish those properties. Confidence is a model heuristic, not demonstrated empirical accuracy.
+
+## Verification
+
+Regression tests check deterministic text and state immutability, CLAIM preservation, effect lineage across independent origins, exact delta reconciliation, forecast attribution sums, restart comparisons, player/reaction coverage, continued tick numbering, and isolated intervention forecasts. Full backend/PostgreSQL migration checks, frontend build, runtime checks and production smoke are required for release.
